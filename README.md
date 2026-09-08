@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building six templates (cognee, Multica, projectmem, gortex, Observal, WeKnora).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building seven templates (cognee, Multica, projectmem, gortex, Observal, WeKnora, EverOS).
 
 Template repositories built with it:
 
@@ -14,3 +14,4 @@ Template repositories built with it:
 | gortex | https://railway.com/deploy/gortex | [gortex_railway_template](https://github.com/RockinPaul/gortex_railway_template) |
 | Observal | https://railway.com/deploy/observal | [observal_railway_template](https://github.com/RockinPaul/observal_railway_template) |
 | WeKnora | https://railway.com/deploy/weknora | [weknora_railway_template](https://github.com/RockinPaul/weknora_railway_template) |
+| EverOS | https://railway.com/deploy/everos | [everos_railway_template](https://github.com/RockinPaul/everos_railway_template) |
