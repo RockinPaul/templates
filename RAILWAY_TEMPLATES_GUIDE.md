@@ -1,8 +1,8 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, written down after building and publishing eight of them in September 2026: **cognee**, **Multica**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS** and **Notesnook**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twelve of them in September 2026: **cognee**, **Multica**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace** and **HertzBeat**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
-Related repos (all under `github.com/RockinPaul`): `cognee_railway_template`, `multica_railway_template`, `projectmem_railway_template`, `gortex_railway_template`, `observal_railway_template`, `weknora_railway_template`. Read one of the last two for a current, complete example.
+Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
 ---
 
@@ -12,10 +12,10 @@ A Railway template is **not** a file in a repo. It is an object in the Railway w
 
 The approach that worked every time:
 
-1. **Thin wrapper repo.** One public GitHub repo per template. It contains one Dockerfile per repo-built service, each `FROM <upstream image>:<pinned tag>`, plus small entrypoints and config overrides that adapt upstream to Railway. No fork of upstream code. Upgrading is a one-line tag bump.
+1. **Thin wrapper or starter repo.** One public GitHub repo per template. Prefer a pinned upstream image plus small entrypoints/config overrides. When upstream is a framework or CLI, build from pinned packages or checksum-verified release artifacts and add only the needed application/adapter code (Pipecat, mise). Avoid an unnecessary upstream fork. Small pin changes still require integration tests; a version bump is not proof of compatibility.
 2. **Reference project.** A normal Railway project where the services run from that repo (and from stock images for databases). It is the living proof that the stack works, and the source from which the template definition is generated.
-3. **Generated template.** `railway templates create --project <id>` turns the reference project into a template definition. It captures sources, healthchecks, volumes, domains and *variable references*, but **no literal variable values**. Those are typed into the dashboard composer by a human (there is no API for it).
-4. **Publish.** `railway templates publish <id> --category ... --description ... --readme-file TEMPLATE_OVERVIEW.md --image <url>`. The marketplace code becomes the slug of the template **name**, so rename it in the dashboard before publishing.
+3. **Generated template.** `railway templates create --project <id>` turns the reference project into a template definition. It captures sources, healthchecks, volumes, domains and *variable references*, but literal defaults and some deployment settings can be omitted. Fill and verify them through the authenticated template change-set API (§3.9.1) or the dashboard composer.
+4. **Publish.** `railway templates publish <id> --category ... --description ... --readme-file TEMPLATE_OVERVIEW.md --image <url>`. The marketplace code becomes the slug of the template **name**, so finalize the name through a change set or the dashboard before publishing.
 5. **Verify the published thing.** `railway deploy -t <code>` into a scratch project, exercise it like a user, delete the scratch project.
 6. **Write it down.** README, TEMPLATE_OVERVIEW, CHANGELOG in the repo; memory notes; cognee dataset.
 
@@ -25,7 +25,7 @@ Never publish without steps 2 and 5. Half of the bugs below were only visible on
 
 ## 2. Toolchain and access
 
-- `railway` CLI (v4+): `railway login`, `railway init -n <name>`, `railway add`, `railway variables`, `railway volume`, `railway domain`, `railway up`, `railway deploy -t`, `railway logs`, `railway ssh`, `railway templates create|publish`, and the escape hatch `railway api '<graphql>'`.
+- `railway` CLI: older examples below use v4-era syntax; the September 9 additions were verified with CLI **5.49.3** and Railway TypeScript SDK **3.11.0**. Commands include `railway login`, `railway init`, `railway add`, `railway variables`, `railway volume`, `railway domain`, `railway up`, `railway deploy -t`, `railway logs`, `railway ssh`, `railway config plan|apply`, and `railway templates create|publish`. Check local `--help` before copying an older command.
 - `gh` CLI for repos (`gh repo create`, `gh api`).
 - Docker (OrbStack on macOS: `open -a OrbStack` and wait if the daemon died between turns).
 - A **linked directory per project**: `railway init` or `railway link` writes the project link into the current directory. Keep one scratch directory per reference project and run `railway variables/logs/ssh` from there. Running them elsewhere fails with unhelpful JSON parse errors.
@@ -46,7 +46,7 @@ Useful GraphQL calls (all via `railway api '...'`):
 | Deployment logs | `query { deploymentLogs(deploymentId:"…", limit:400) { timestamp message severity } }` |
 | Delete a project | `mutation { projectDelete(id:"…") }` |
 
-There is **no** mutation to rename a template or to edit its variables; `TemplatePublishInput` only has `category, demoProjectId, description, image, readme, workspaceId`.
+`TemplatePublishInput` itself does not expose template-name or variable editing. That is not an API-wide limitation: authenticated `templateChangeSetStage` / `templateChangeSetApply` on the internal endpoint can edit them (§3.9.1). Internal API shapes are not a stable public SDK contract; revalidate them and read back the saved definition.
 
 ---
 
@@ -64,7 +64,7 @@ Clone upstream shallowly into a scratch directory and answer these, in writing:
 - **First admin.** How does the first user get created? Patterns seen: open registration + bootstrap env var promoting an email at startup (WeKnora), seeded demo accounts (Observal), loopback-only bootstrap endpoints that cannot work behind a proxy (Observal `/auth/bootstrap`), Lite-only auto-setup (WeKnora), bearer token generated by the template (gortex, projectmem), login codes printed to stdout (Multica).
 - **Networking.** Where does each process bind (`0.0.0.0`, `::`, `[::]`, empty)? Does the frontend proxy the API (then only the frontend needs a public domain)? Any hardcoded hostnames or ports in built assets (Observal's web bundle hardcoded `hostname:8000` for websockets)?
 - **Entrypoints.** What do upstream entrypoints do (chown, gosu, migrations, stamping)? Reuse them; wrap, don't replace.
-- **License** (must allow redistribution; all eight were MIT/Apache-2.0/AGPL-3.0), **release cadence** (daily releases mean frequent tag bumps), **resource needs** (Helm `values.yaml` limits are a good source).
+- **License** (check redistribution obligations for each pinned upstream and the wrapper), **release cadence** (daily releases mean frequent tag bumps), **resource needs** (Helm `values.yaml` limits are a good source).
 - **Version skew.** Always read config files from the **release tag you pin**, not from `main` (`git fetch --depth 1 origin tag vX.Y.Z; git show vX.Y.Z:path`). WeKnora's main referenced an nginx `log_format` that the v0.8.0 image did not ship.
 
 Write the result as a short feasibility note with a services table, risks to verify in rehearsal, and the open decisions.
@@ -87,6 +87,8 @@ Typical decisions that need a human: which optional components to include, which
 ```
 
 Give every repo-built service its own Dockerfile even when it is a one-liner (`FROM image:tag`), so all pins are bumped in git and every deployer is notified through Railway's repo-update flow. Railway selects the file through the `RAILWAY_DOCKERFILE_PATH` variable on the service.
+
+Newer templates use native `.railway/railway.ts` with explicit `github("Owner/repo", { branch: "main" })`, `build.dockerfilePath`, watch patterns, volumes and deploy settings. The Dockerfile-path variable remains a supported older pattern, but can become an unwanted composer input when generated. Do not add deprecated `railway.json` / `railway.toml` files to these native-IaC examples. Preview before applying: an omitted variable map can delete existing variables, so preserve known keys or discover owner-variable names with an explicitly scoped, fail-closed helper (§5.13).
 
 ### 3.4 Writing the wrappers
 
@@ -164,7 +166,7 @@ Notes:
 
 ### 3.7 Verify on Railway like a user
 
-Through the **public** domain only (that is all a deployer gets):
+Use the deployer's intended entry point: the **public** domain for browser/API stacks, or managed **Railway SSH** for a private workspace such as mise. Do not add a public HTTP service just to test an SSH-only template. For browser/API stacks:
 
 - SPA `/` → 200 and the runtime config it renders.
 - Proxied API health/version endpoints → 200 with the pinned version.
@@ -186,9 +188,9 @@ railway templates create --project <projectId>          # → template id, code 
 railway api 'query { template(id:"<id>") { name code status serializedConfig } }'   # dump and inspect
 ```
 
-Dump the definition with a script that prints, per service, source/deploy/volumes/networking and every variable with `defaultValue`, `isOptional`, `description`. Every literal default is `null`: hand the user a **one-per-line list** of `KEY = value` per service (they cannot copy from prose tables) plus short descriptions. Conventions: `${{secret(64)}}` for JWT/secret keys, `${{secret(32)}}` for passwords and exactly-32-byte keys, `${{secret(24)}}` for demo passwords; `RAILWAY_DOCKERFILE_PATH`, `PORT`, log levels, locale; database images get their stock aliases (`PGUSER=${{POSTGRES_USER}}`, `REDISPASSWORD=${{REDIS_PASSWORD}}`, `REDIS_URL=…`). Optional user inputs (bootstrap email, tokens for private repos) stay **empty and marked optional**; Railway omits empty optional variables at deploy.
+Inspect the definition per service: source/deploy/volumes/networking and each variable's `defaultValue`, `isOptional`, `description`. Redact actual credentials; do not dump secret values into logs or these records. Literal defaults are generally `null` after generation. Fill them through §3.9.1, or hand the user a **one-per-line list** of `KEY = value` per service for manual composer editing, with each description on its own line. Conventions: `${{secret(64)}}` for JWT/secret keys, `${{secret(32)}}` for passwords and exactly-32-byte keys, `${{secret(24)}}` for demo passwords; fixed Dockerfile paths/ports/log levels/locale as appropriate; stock database aliases remain references. Optional inputs stay empty, not whitespace. Conditional provider keys can be optional in the form while the app validates the selected provider's required keys before creating paid resources (Pipecat).
 
-After the user fills the composer:
+After filling the definition through either route:
 
 1. **Read the definition back** and diff against the expected list. Real slips caught this way: a generated secret placed on the alias (`REDISPASSWORD`) instead of `REDIS_PASSWORD`; a leading space in ` ${{secret(48)}}`; a single-space default `" "` that the backend did not trim (broke every fresh Multica deploy with HTTP 500).
 2. Make sure the **name** is final (code = slug of the name; `weknora-railway-template` would have become the code).
@@ -197,8 +199,22 @@ After the user fills the composer:
    railway templates publish <id> --category "AI/ML" --description "<= 75 chars" --readme-file TEMPLATE_OVERVIEW.md --image https://raw.githubusercontent.com/<upstream>/<tag>/docs/img/x.png
    ```
    `--image` must be a URL (a local path fails with "Invalid image URL"); use a raw GitHub URL of an upstream screenshot or logo. Description longer than 75 characters is rejected. If upstream's banner is a GitHub **user-attachment** (`github.com/user-attachments/assets/…`) it is not a stable URL: curl gets 403 without a browser user agent and the redirect target is a signed S3 URL that expires in minutes. Download it with a browser UA, commit it to the template repo as `docs/cover.jpg`, and pass that raw URL (EverOS).
-4. One-click verification: `mkdir v && cd v && railway init -n <name>-template-verify && railway deploy -t <code>`. If the template has empty required defaults the command prompts and dies without a TTY; pass `-v service.KEY=value`. Wait for all services, run §3.7 against the new domain, read generated secrets' lengths from `railway variables --json`, then `projectDelete`. Probe the API with the **exact request bodies from your README**, not hand-typed ones: an EverOS `add` written from memory returned 422 "Field required: session_id" and then "messages.0.sender_id", which looks like a broken deploy but is only a wrong payload. Expect indexing lag: a keyword search right after a flush was empty for one to two seconds until the cascade worker had upserted the Markdown.
+4. One-click verification: create a short-named scratch project, confirm its exact linked ID, then run `railway deploy -t <code>`. If the template has empty required defaults the command prompts and dies without a TTY; pass `-v service.KEY=value`. Wait for the intended entry point to be ready and run §3.7 through the public domain for web apps or managed SSH for a private workspace. Check generated secrets' lengths without logging their values, then delete only the verified scratch project. Probe APIs with the **exact request bodies from your README**, not hand-typed ones: an EverOS `add` written from memory returned 422 "Field required: session_id" and then "messages.0.sender_id", which looks like a broken deploy but is only a wrong payload. Expect indexing lag: a keyword search right after a flush was empty for one to two seconds until the cascade worker had upserted the Markdown.
 5. Republishing later (new readme/description/image) is the same command; the code stays.
+
+### 3.9.1 CLI/API authoring verified on OpenPencil and mise
+
+Browser automation is not required. Use the authenticated account's existing access without copying tokens into scripts, repositories, screenshots or logs. Public operations use `https://backboard.railway.com/graphql/v2`; the template editor uses `https://backboard.railway.com/graphql/internal`.
+
+1. Read `template(code: ...) { id code name status readme serializedConfig }`. The real service definition is **`serializedConfig`**, not the legacy `config` field. Resolve the template's own service/volume IDs; they are not the reference project's IDs.
+2. Check `templateChangeSets(templateId: ..., includeInactive: false, first: 10)` for active edits. Do not merge over someone else's unfinished changes.
+3. Stage a narrow `TemplatePatch` with `templateChangeSetStage(templateId: ..., patch: ..., merge: true) { id status }`. A variable edit is `config.services[templateServiceId].variables.KEY = { defaultValue, description, isOptional }`; naming and overview edits are `metadata.name` and `metadata.readme`. For an overview-only update, send only `metadata.readme`.
+4. Apply the returned change-set ID with `templateChangeSetApply(changeSetId: ...) { id status }`. If a response says it was already applied, read the current state before retrying.
+5. Set initial volume size explicitly with the public `templateVolumeUpdate(templateId, serviceId, volumeId, sizeMB)` mutation. OpenPencil uses **1024 MB**; mise uses **5000 MB**. Without this explicit field, a new deployment can receive its plan's much larger default volume size.
+6. Read back metadata and `serializedConfig`, comparing fields rather than JSON key order. The generator omitted mise's resource caps, sleep/replica settings and daily backups; these were explicitly restored in the template. `volumeMounts[templateVolumeId].backupSchedules = ["DAILY"]` produced a real daily schedule in the fresh mise copy. Do not infer success just because an authoring file declared a setting.
+7. Publish, then verify a fresh copy. Use a short valid project name, abort if `railway init` fails, and assert the exact linked project ID and empty contents before `railway deploy --template <code>`; that command has no `--project` flag. A failed init must never fall back to a parent directory's project link.
+
+An overview update can be saved correctly while the public page still serves a cached older copy. Verify through unauthenticated template readback and, if necessary, a query-string cache-busted page. During the mise update the frontend advertised a one-hour cache. Keep the repository's `TEMPLATE_OVERVIEW.md` synchronized with the saved overview; verify links and distinguish local commands from commands run inside the service.
 
 ### 3.10 Capture knowledge
 
@@ -220,6 +236,7 @@ Per template: a memory note with ids (project, environment, services, volumes, t
 
 **Volumes**
 - One volume per service, root-owned, with a `lost+found` directory at the mount root. Consequences: initdb needs a subdirectory (`PGDATA`); redis 8.2's entrypoint prints "Unknown file './lost+found'… Permissions will not be modified" and then cannot write snapshots (`MISCONF`) — remove the empty directory first (`rmdir /data/lost+found 2>/dev/null` is enough; Railway's own Redis template uses `rm -rf $RAILWAY_VOLUME_MOUNT_PATH/lost+found/`); apps running as non-root cannot write until something chowns the directory (`RAILWAY_RUN_UID=0` then drop privileges).
+- Volumes mount at runtime, not during the Docker build or pre-deploy phase. Keep first-boot seed assets outside the mount; test Docker named volumes with `volume-nocopy` so automatic Docker population does not hide a Railway cold-start bug.
 - `RAILWAY_VOLUME_MOUNT_PATH` is available inside the container.
 - Deleting a volume: `volumeDelete`; the data is restorable for 48 h through the dashboard.
 
@@ -231,14 +248,14 @@ Per template: a memory note with ids (project, environment, services, volumes, t
 - `railway variables --service X -e production --set K=V --skip-deploys`; `--json` to read (from the linked dir).
 
 **Builds and deploys**
-- Connecting a repo triggers a build; every push to the branch rebuilds all services connected to it (even those whose files did not change).
+- Connecting a repo triggers a build. Unfiltered sources can rebuild on any push; explicit per-service watch patterns prevent documentation-only updates from restarting unrelated workloads. Verify that those patterns survive template generation.
 - Restart policy default `ON_FAILURE`, 10 retries. A service that crashes while a database is still initialising can exhaust them; add a wait loop or accept the retries.
 - Healthcheck: HTTP path only, on the private network; set `healthcheckTimeout` high (600 s) when migrations run before the port opens. gRPC-only services get no healthcheck.
 - Rollback starts the old image on the new schema; forward-only migrations then log errors (Multica). Don't promise rollbacks.
 
 **Templates**
-- Generation captures structure and references, not literal values. Values, descriptions and the template name are dashboard-only.
-- The published **code** is the name slug. Rename before publishing; no rename API. An abandoned template with a random code (`mVtlXT-…`, `tS2HIy`, `shcTAS`) is what you get otherwise.
+- Generation captures structure and references, but literal defaults and some deployment settings need explicit completion. Values, descriptions and the template name can be edited through authenticated change sets (§3.9.1) or the dashboard.
+- The published **code** is the name slug. Finalize the name before publishing through a change set or the dashboard. An abandoned unpublished template can retain a random code (`mVtlXT-…`, `tS2HIy`, `shcTAS`); verify the final deploy URL instead of reusing its draft code.
 - `railway deploy -t <code>` uses the template's defaults; missing defaults → interactive prompts → failure without a TTY.
 - Marketplace description ≤ 75 characters. `--image` is a URL. The overview readme has an expected structure (§6).
 - Deployers are notified of updates when the template repo's branch changes.
@@ -409,6 +426,53 @@ Notesnook's sync server is MongoDB + MinIO + four app services (identity, sync, 
 
 Verification is the real client's path, not hand-typed requests: signup is `POST /users` (form `email`,`password`,`client_id=notesnook`) returning an access token; attachment round-trip is `PUT /s3?name=` then `GET /s3?name=` — and curl needs `--upload-file --http1.1`, because `--data-binary` over HTTP/2 sends the body as zero bytes and the server reports `Sent 0 request content bytes`.
 
+### 5.11 A one-service, multi-provider browser voice starter (Pipecat)
+
+[Pipecat](https://github.com/pipecat-ai/pipecat) is a framework, so the [template](https://github.com/RockinPaul/pipecat-railway-template) supplies the small session API, bot lifecycle and bundled browser client. It pins Pipecat **1.8.1** on Python **3.12.14**, runs as an unprivileged app user, and exposes one HTTP service with `/health`. There is no database, persistent volume, queue or separate frontend service; Daily is the external WebRTC transport, not another Railway container.
+
+- **Provider-dependent requirements.** `DAILY_API_KEY` and the generated `ACCESS_PASSWORD` are always required. `AI_PROVIDER` selects OpenAI Realtime, Gemini Live, Grok Voice, OpenRouter or an existing Ollama server. The first three use native voice APIs; OpenRouter/Ollama compose STT → LLM → TTS. Their `SPEECH_PROVIDER` can select OpenAI or OpenRouter, so the required speech key may differ from the LLM key. Unused provider keys stay empty; the app validates the selected combination before creating a paid Daily room.
+- **Ollama is an endpoint, not included compute.** The server/model must already exist and be reachable from Railway. `localhost` means the Pipecat container, not the deployer's laptop. Hosted speech is still needed in that mode. Never imply that choosing Ollama makes the entire stack free or provisions a GPU/model server.
+- **Contain the session lifecycle.** One replica, one worker, one active conversation. Request microphone permission before starting a paid session; allocate a private two-participant room and short-lived browser token, wait for the bot to join, and clean up on disconnect, timeout, bot exit or startup failure. The default duration is 600 seconds, with a 30–1800-second accepted range. Room/token expiry remains a backstop after an abrupt container stop.
+- **Separate readiness from paid-provider verification.** `/health` makes no provider calls and proves neither valid credit nor working audio. Offline adapter tests cover all five modes; the README records live synthetic-browser-audio verification for the OpenAI reference route, not live verification of Gemini, Grok, OpenRouter or a real Ollama endpoint. Do not label mocked adapter construction as end-to-end voice validation.
+
+Provider keys stay server-side; the browser receives a scoped Daily token. There is no app recording/transcript persistence or multi-user account system. Railway, Daily and the selected AI/speech providers have separate usage charges. The [README](https://github.com/RockinPaul/pipecat-railway-template#choose-a-provider) records the full conditional variable matrix and verification boundaries.
+
+### 5.12 An explicitly saved shared design workspace behind Caddy (OpenPencil)
+
+The [OpenPencil template](https://github.com/RockinPaul/openpencil-railway-template) pins the upstream **v0.8.4 prerelease** Rust web-host image by digest. A public Caddy `gateway` authenticates the UI, assets, APIs and streams; `openpencil` stays private on port 3100. The app healthcheck is `/`; the gateway exposes a sanitized `/healthz`. There is one **1024 MB** initial volume at `/data`, no database, and no inference server/GPU provisioned by the template.
+
+- **Document the actual save operation.** The shared startup file is `/data/workspace.op`. **File → Save** persists it through the native save endpoint; **Save As** downloads an export. Unsaved edits do not survive replacement. Initialize an empty document only if it is missing, never overwrite an existing file at boot, and test an actual edited shape after save/redeploy rather than checking file presence alone.
+- **One password is not user isolation.** Users sign in as `admin` with the deployment-generated `ACCESS_PASSWORD`; everyone with it sees the same document. This is for an individual or mutually trusted group, not separate private accounts or a hosted collaboration hub. Keep the backend's control/MCP endpoints off the public internet.
+- **Origin checks and credential storage are distinct controls.** Retain the app's native origin checks and the gateway's exact public-origin policy. Updating a custom domain requires updating the configured origin. Browser-entered AI keys remain in same-origin local storage and accompany relevant AI requests; the wrapper disables shared server persistence of browser credential snapshots and refuses to enable it. This is not a per-user secret vault.
+- **Health responses must not leak the private backend.** The unauthenticated gateway healthcheck reports sanitized upstream health, not arbitrary backend content. AI endpoint exceptions require an explicit exact-origin allowlist; no inference server is installed by filling that field.
+
+Recorded validation: **80 tests**, independent security review, real browser editing, explicit saves surviving Railway redeployment, and a fresh published-template copy. Live AI-provider calls were not part of that validation. Basic editing requires no AI key. See the [usage and save semantics](https://github.com/RockinPaul/openpencil-railway-template#save-versus-export).
+
+### 5.13 A private persistent developer home with no web server (mise)
+
+[Persistent mise Workspace](https://github.com/RockinPaul/mise-railway-template) is one SSH-only service: pinned Debian 13 slim for **Linux/amd64**, mise **2026.9.3**, Node **24.21.0**, Python **3.13.15**, uv **0.12.11**, Bash/Git/tmux/build utilities and Tini. One `/root` volume starts at **5000 MB**; one replica, sleeping off, **2 vCPU / 2 GiB** limits and daily backups. These are caps, not a price or utilization promise. There are no public domains, SSH daemon, app secrets, database or browser IDE. Managed Railway SSH was verified as UID 0 with `/root` home: trusted container owner, not host root or multi-tenant isolation.
+
+- **Prebuild tools at their final prefix.** Install the locked starter runtimes under `/root/.local/share/mise` during the Docker build, then copy the complete tree—including hidden backend metadata—to `/opt/workspace-seed` outside the runtime mount. Restore to the same absolute prefix; Python sysconfig and virtual environments can contain absolute paths. Generate the global lock with `mise lock --global --platform linux-x64`; its filename is `.config/mise/mise.lock`, not `config.lock`. Use conservative precompiled x86_64 Python instead of accidental CPU-specific/source builds.
+- **Seed once without running owner content.** Require a real writable `/root` mount, use image-only startup PATH, publish a missing store through a temporary sibling plus atomic rename, and write the completion marker last. Preserve existing configs/dotfiles/symlinks and installed versions. Later boots neither execute profiles/project hooks nor reinstall removed tools. Reject unsafe/conflicting initialization paths instead of recursive repair. Image-managed mise and system utilities remain outside the volume for recovery.
+- **Verify trust behavior, not just settings.** The pinned mise release's `CI=true` forces automatic trust confirmation even with `paranoid=true`; setting `MISE_PARANOID=1` or `MISE_YES=0` did not counter it. A small launcher refuses inherited CI auto-approval, preserves shim argv[0], and sets `__MISE_BIN` so activation/regenerated shims use the guard. For a deliberately trusted project needing CI behavior, run `env -u CI mise exec -- env CI=true COMMAND`. Revalidate/remove the workaround when upgrading mise. Automatic command/exec installation is disabled, install jobs are 2, and Python compilation is disabled.
+- **Preserve arbitrary owner variables when applying IaC.** SDK 3.11.0 / CLI 5.49.3 treated omitted variables as deletions. The native authoring helper reads variable names with explicit project/environment/service IDs, maps them to `preserve()` (including sealed/null values), and fails closed with redacted errors. A real preview and apply retained a test variable. Keep the native destructive confirmation guard enabled; do not pass `--confirm-destructive` to bypass unexpected deletion plans.
+- **Prove the persistence boundary.** Twenty-seven automated tests covered offline first boot/replacement and safety cases. Actual Railway reference and fresh-template redeploys preserved a project, venv and explicitly installed uv 0.12.10; `/tmp` and tmux processes disappeared. A snapshot restore recovered a changed file and the deliberately uninstalled extra uv version, which executed successfully without a reinstall. CLI/API restore created a detached volume; it had to be attached at `/root`, followed by waiting for the resulting deployment/SSH readiness. Retain the original volume until recovery checks pass, then recheck backup scheduling on the replacement.
+
+Initial IaC provisioning did not establish the reference's intended daily schedule; it was enabled and read back via the public backup API. The published template's explicit `backupSchedules: ["DAILY"]` did create a schedule in the fresh copy. Likewise, the running manifest did not expose `requiredMountPath`, so the entrypoint's mount check is the actual guard. Files under `/root` persist; manual OS package changes outside it and running processes do not. The [verification report](https://github.com/RockinPaul/mise-railway-template/blob/main/docs/VERIFICATION.md) and [linked usage overview](https://github.com/RockinPaul/mise-railway-template/blob/main/TEMPLATE_OVERVIEW.md) preserve the evidence and recovery instructions.
+
+### 5.14 A Spring Boot app: environment beats the packaged config, and a zero-input template (HertzBeat)
+
+[Apache HertzBeat](https://railway.com/deploy/apache-hertzbeat) published with **zero composer fields** — `railway deploy -t` did not prompt at all, unlike a template whose optional fields are merely empty. Three services (the app, PostgreSQL, VictoriaMetrics), each built from its own `rootDirectory`. What got it there:
+
+- **Do not bake a config file; override the packaged one with environment variables.** Spring's relaxed binding turns `warehouse.store.victoria-metrics.url` into `WAREHOUSE_STORE_VICTORIA_METRICS_URL`, and environment wins over the `application.yml` inside the image. Upstream's own compose setting only the datasource credentials that way is the hint it works for everything. This avoids owning a file that drifts on every version bump.
+- **Read the defaults out of the PINNED IMAGE, not the repository.** `docker run --rm --entrypoint sh <image> -c 'cat /opt/.../application.yml'`. HertzBeat's repo compose is Hibernate-flavoured while the published 1.8.0 image runs **EclipseLink**, and that compose pins an image tag that is not on Docker Hub yet. Configuring from the repo would have produced a wrong, confidently-written template.
+- **Swap embedded stores for real ones by environment, and check the driver already ships.** The image defaults to embedded H2 for metadata and embedded DuckDB for metrics; `SPRING_DATASOURCE_DRIVER_CLASS_NAME` plus `SPRING_JPA_DATABASE` and `SPRING_JPA_DATABASE_PLATFORM` move it to Postgres, and `WAREHOUSE_STORE_DUCKDB_ENABLED=false` with `..._VICTORIA_METRICS_ENABLED=true` move the metrics. The Postgres driver, `flyway-database-postgresql` and `db/migration/{h2,mysql,postgresql}` were already inside, and Flyway's packaged `locations: classpath:db/migration/{vendor}` then resolved to postgresql by itself — no migration path to set.
+- **`SERVER_PORT=8080`** so Spring listens on Railway's injected `PORT`, with the domain pointed at 8080 (§5.10).
+- **Expect the actuator to sit behind the app's own auth.** `/actuator/health` answered **401** because HertzBeat's sureness layer covers `/actuator/**`. The entrypoint appends one line to the shipped `sureness.yml` excluded list so only health is open; metrics and prometheus stay protected, and Spring hides health details by default, so it emits `{"status":"UP"}` and nothing more. Look for an already-open route first — `/===get` was there, making the UI root a usable fallback.
+- **Credentials read from a file rather than a database are a template problem.** Accounts come from sureness's `DocumentAccountProvider` reading `config/sureness.yml`, default `admin`/`hertzbeat`. Generate a password and have the entrypoint rewrite **only** the credential under `- appId: admin` (awk over that block, not a global sed, so comments and any other account survive), patching the shipped file in place so a version bump keeps upstream's. Then say plainly in the README that an in-app password change will not survive a redeploy.
+
+Verify through the product's own API and assert on bodies, not status codes: HertzBeat answers bad credentials with **HTTP 200** and `{"msg":"Incorrect Account or Password","code":5}`. Creating a monitor uses **`paramValue`**, not `value`; the wrong key returns "Params field host is required.". To prove the metric write path when the time-series database is private, either read it back through the app — its history endpoint refuses when the store is unreachable, so a success code is itself proof — or attach a domain to the store for a single query and delete it again.
+
 ---
 
 ## 6. Documentation set
@@ -466,25 +530,35 @@ Databases
 - Rollbacks with forward-only migrations fail at runtime.
 
 Variables / templates
-- Generated templates have no literal values; the composer is dashboard-only; hand over a one-per-line list.
+- Generated templates omit literal defaults; fill them through authenticated template change sets (§3.9.1) or a one-per-line manual composer handoff.
 - `${{secret(N)}}` with N = the exact length the app requires (32 for AES-256 keys).
 - Read the definition back: aliases vs. real keys, leading spaces, single-space defaults, empty vs optional.
 - Referenced values are empty until the referenced service deployed once.
 - Empty optional variables are omitted at deploy; `" "` is not empty.
-- Template generation **preserves** `${{...}}` references and `${{secret(N)}}`; it **nulls every literal** into a composer field. So wire all inter-service hosts/URLs/shared-secrets as references in the reference project, and bake fixed constants into wrapper images, before generating — otherwise the deployer must type them.
+- Read a config default out of the **pinned image**, not the repo: a project's compose and packaged config can be ahead of the published tag (a different JPA provider, an image tag that does not exist yet).
+- A Spring Boot app needs no baked config: relaxed binding maps `a.b.c-d` to `A_B_C_D` and environment beats the packaged `application.yml`. Point `SERVER_PORT` at Railway's port.
+- An app's `/actuator/**` or equivalent admin path may sit behind its own auth and answer the platform healthcheck with 401. Open just the health path, or use a route the app already leaves unauthenticated.
+- Credentials read from a file inside the image, rather than a database, must be rewritten by the entrypoint from a generated variable, or every deployment ships a known password. Warn that in-app password changes then do not survive a redeploy.
+- Assert on response bodies: some APIs answer a failed login with HTTP 200 and an error code in the payload.
+- Template generation **preserves** `${{...}}` references and `${{secret(N)}}` but nulls literal defaults. Wire inter-service hosts/URLs/shared secrets as references. Bake fixed constants into wrapper images or restore them as defaults through change sets/the composer before publishing; deployers should not have to type internal wiring or Dockerfile paths.
 - Build a repo service from a subdirectory with `serviceInstanceUpdate(input:{rootDirectory:"<svc>"})` (preserved in the template) instead of a `RAILWAY_DOCKERFILE_PATH` variable (nulled into a required composer field).
-- Rename a template by renaming the reference **project** (`projectUpdate(input:{name})`) then regenerating — the template inherits the project name, and there is no template-rename mutation. Publish slugs the name into the code.
+- Finalize a template name through `metadata.name` in a template change set or the dashboard before publication. Renaming the reference project and regenerating was an older workaround, not a requirement. Publish slugs the name into the code.
 - Template code = name slug; rename before publishing; publish description ≤ 75 chars; `--image` must be a URL.
 - `railway deploy -t` prompts for missing defaults and fails without a TTY, even for OPTIONAL fields (`-v svc.KEY=val`).
 - `serviceInstanceUpdate` and `serviceDomainUpdate` return a **Boolean**, not an object — a `{ id }` selection set fails to parse. `serviceDomainUpdate` needs the whole input (`serviceDomainId`, `serviceId`, `environmentId`, `domain`, `targetPort`), not just the changed field.
 - Deep-nested `railway api` GraphQL is easy to mis-brace on the shell; write the query to a file and check `{` vs `}` counts before sending.
 - GitHub user-attachment banners are not stable image URLs (403 for curl, expiring signed redirect); commit a copy to the template repo and use its raw URL.
 - Reference values such as `${{EVEROS_LLM__API_KEY}}` survive template generation; every literal default does not. Verify with the read-back which of your composer entries actually stuck.
+- `serializedConfig` holds the real modern template service definition; legacy `config` can be just `{plugins:[]}`.
+- Set volume size explicitly. Also verify resource caps, replicas, sleeping, watch patterns and backup schedules in the actual fresh deployment, not only the reference project or authoring file.
+- Omitted native-IaC variables can mean **delete**, not preserve. Use explicit `preserve()` markers; for arbitrary owner names, fail closed on scoped discovery errors and retain the native destructive-apply guard.
+- API/CLI success may precede provisioning, volume attachment or SSH readiness. Poll the workflow and resource state before retrying mutations; do not create duplicates because one readback is stale.
 
 Repos / CLI
 - `railway add -r` "You do not have access" → `serviceConnect`; new repos may be "Not Authorized" for ~40 min.
 - `railway variables/logs/ssh` need the linked directory.
-- Every push rebuilds every connected service.
+- Without watch filters, every push can rebuild connected services. Copy explicit per-service watch patterns into the published template to avoid restarting user sessions for README edits.
+- Keep project names short and abort after any failed `railway init`; confirm the exact intended linked project ID before template provisioning so a parent directory's link cannot receive the deployment.
 - Sub-agent reports can get lost; have them write files.
 - **Before `git add` in a new folder, `git rev-parse --show-toplevel` must print that folder.** A parent directory that is itself a git repo swallows the add: `git init` guarded by `--is-inside-work-tree` did not run, and `git add -A` pushed 455 workspace files (agent config, memory notes, other projects) to a brand-new public repo. `git init` unconditionally in the new directory; prefer explicit paths over `-A` in directories you did not create this session.
 - A force-push does **not** remove a leaked commit from GitHub: it stays fetchable by hash (`repos/<r>/commits/<sha>`, full tree) and the repo activity feed lists the old hash next to the new one. Make the repo private at once, then delete and recreate it (`gh auth refresh -s delete_repo`, `gh repo delete`, `gh repo create`, push) and verify the old hashes return 404.
@@ -493,6 +567,9 @@ Repos / CLI
 Docs
 - Copy nothing from upstream READMEs without checking the CLI: flags drift (`--patch` vs `patch`).
 - Claims about auto-behaviour (demo cleanup, migrations, trusted proxies) must be tested, not inferred from one code path.
+- A model adapter, healthy app or valid template does not prove live provider credit/audio/AI generation. Record what was actually exercised and which provider paths remain unverified.
+- Distinguish Save from export, file persistence from process persistence, and local CLI commands from remote shell commands. Link the included software and explain first use rather than supplying only an architecture summary.
+- A saved published overview may be hidden by a cached public page. Compare public API readback and a cache-busted page before treating it as a failed metadata update.
 
 ---
 
@@ -508,6 +585,10 @@ Docs
 | WeKnora | `weknora` | frontend (nginx, v0.8.0-tag config), app (Go, `[::]`, Postgres wait), docreader (gRPC, inline images), ParadeDB, Redis | Config from the release tag, not main; `SERVER_HOST=[::]`; Redis `rmdir lost+found`; no `PG*` aliases on ParadeDB; forwarded-proto/for maps for OIDC and client IPs; bootstrap admin by email + redeploy; rename before publish |
 | EverOS | `everos` | everos (python:3.12-slim + `everos[multimodal]==1.3.1` from PyPI, Caddy 2.11 in the same container, volume `/data`) | No upstream image and no auth: Caddy bearer gate on `PORT`, app on private `:8000` for the header-less official plugins; token charset/length validated (Caddy matcher wildcards); fail-fast on the LLM key; `everos init` on cold start despite docs; zombie-aware Caddy watchdog (PID 1 does not reap); `EVEROS_API__HOST=` for dual-stack; `file://` reads fenced to `/data/uploads`; keyword search until embeddings exist; cover committed to the repo because upstream's banner is a user-attachment |
 | Notesnook | `notesnook-sync-server` | mongo (7.0.12, single-node RS), minio (+mc), identity/notesnook-sync/sse/monograph (streetwriters images) — 6 services, each built from its own `rootDirectory` | Every app on Railway's `PORT` 8080 (image `PORT` env is overridden); single-node Mongo advertises `localhost` + clients `directConnection=true` (else ReplicaSetGhost); thin wrappers bake the fixed constants so the composer is two optional fields; all wiring by references, shared secret + MinIO creds via `${{secret()}}`/service refs; presigned attachments against the public MinIO domain, data in `/data/s3`; verified with the real signup/token/attachment path |
+| Pipecat | `pipecat` | one Python 3.12.14 / Pipecat 1.8.1 service: session API, bot processes and bundled browser client; external Daily WebRTC; no database or volume | Password-protected, one active session/worker/replica; OpenAI/Gemini/Grok native voice, OpenRouter/Ollama STT–LLM–TTS; conditional key validation before paid room creation; short-lived room tokens and cleanup; Ollama endpoint is not bundled inference; readiness and mocked adapters are not live-provider proof (§5.11) |
+| OpenPencil | `openpencil` | public Caddy gateway, private digest-pinned v0.8.4 prerelease Rust web host, 1024 MB volume at `/data` | `admin` + generated password; one shared `/data/workspace.op`; File → Save persists, Save As exports, no autosave; exact origins and private control endpoints; browser-local AI keys, shared server credential snapshots disabled; 80 tests and real save/redeploy checks, no live AI-provider validation (§5.12) |
+| HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.8.0`), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
+| Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
@@ -542,14 +623,16 @@ for s in cfg['services'].values():
 
 ## Appendix C. Pre-publish checklist
 
-- [ ] Every image tag pinned; tags exist for amd64 and arm64.
+- [ ] Images/artifacts pinned and verified for every advertised architecture; do not claim arm64 support for an amd64-only template.
 - [ ] Local smoke: health, dual-stack listen, user journey through the proxy, websocket 101, second start idempotent, uid/ownership.
 - [ ] Cold start on an empty root-owned volume works (init, chown); killing a sidecar takes the container down.
 - [ ] `git rev-parse --show-toplevel` prints the template repo before every add/push; nothing but the template files is tracked.
-- [ ] Reference project: all services SUCCESS, verified through the public domain, logs clean, client IP correct.
+- [ ] Reference project: services ready and verified through the intended entry point (public HTTP or managed SSH); inspect logs and client IP handling where applicable.
 - [ ] Review report read and triaged; fixes committed; redeploy verified.
 - [ ] README/OVERVIEW/CHANGELOG consistent with each other and with upstream's CLI.
 - [ ] Template definition read back: no empty non-optional values, no whitespace, secrets on the right keys, name final.
+- [ ] Explicit volume size, deployment limits, sleeping/replicas, watch patterns and backup schedules checked in the fresh copy; native IaC preview contains no unexpected variable deletion.
+- [ ] For persistent apps/workspaces: actual content and executable paths survive replacement; snapshot restore tested on disposable data, not merely snapshot creation.
 - [ ] Published with category, ≤ 75-char description, overview readme, image URL.
 - [ ] One-click deploy into a scratch project verified, then deleted.
 - [ ] Memory notes, plan file, cognee dataset updated; repo README button points at the real code.

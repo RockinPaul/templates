@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building eight templates (cognee, Multica, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building eleven templates (cognee, Multica, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace).
 
 Template repositories built with it:
 
@@ -16,3 +16,9 @@ Template repositories built with it:
 | WeKnora | https://railway.com/deploy/weknora | [weknora_railway_template](https://github.com/RockinPaul/weknora_railway_template) |
 | EverOS | https://railway.com/deploy/everos | [everos_railway_template](https://github.com/RockinPaul/everos_railway_template) |
 | Notesnook Sync Server | https://railway.com/deploy/notesnook-sync-server | [notesnook_railway_template](https://github.com/RockinPaul/notesnook_railway_template) |
+| Pipecat | https://railway.com/deploy/pipecat | [pipecat-railway-template](https://github.com/RockinPaul/pipecat-railway-template) |
+| OpenPencil | https://railway.com/deploy/openpencil | [openpencil-railway-template](https://github.com/RockinPaul/openpencil-railway-template) |
+| Persistent mise Workspace | https://railway.com/deploy/persistent-mise-workspace | [mise-railway-template](https://github.com/RockinPaul/mise-railway-template) |
+| Apache HertzBeat | https://railway.com/deploy/apache-hertzbeat | [hertzbeat_railway_template](https://github.com/RockinPaul/hertzbeat_railway_template) |
+
+The September 9 additions include component patterns in guide sections 5.11–5.13 and case-file entries in section 8. Section 3.9.1 records the verified CLI/API template-editing workflow; marketplace metadata and defaults are not limited to manual dashboard editing.
