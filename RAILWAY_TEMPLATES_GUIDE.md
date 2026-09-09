@@ -475,9 +475,9 @@ Verify through the product's own API and assert on bodies, not status codes: Her
 
 ### 5.15 An IPv4-only server, a login page with no password, and five platform traps (Laminar)
 
-[Laminar](https://railway.com/deploy/laminar) published as four services (Next.js frontend, Rust
-app-server, ClickHouse, PostgreSQL) with **two required composer fields** and everything else
-wired. The interesting parts:
+[Laminar](https://railway.com/deploy/laminar) published as five services (Next.js frontend, Rust
+app-server, ClickHouse, Quickwit, PostgreSQL) with **two required composer fields** and everything
+else wired. The interesting parts:
 
 - **Find the project's own "lite" switch before adding services.** `ENVIRONMENT=LITE` turns
   RabbitMQ, Redis and Quickwit from dependencies into no-ops, each gated purely on its URL
@@ -534,6 +534,33 @@ Each one presents as an application bug. Check these before debugging the app:
    `railway templates create` fails with "Service <name> does not have a source that can be used to
    generate a template" and names only the first service alphabetically even when all are affected.
    Call `serviceConnect(id, input: {repo, branch: "main"})` on each; it preserves `rootDirectory`.
+
+#### Three traps in the feature that was nearly shipped broken
+
+The first version of this template shipped without Quickwit, and the review question "how useful
+is this actually?" is what surfaced the problem. **A missing search backend is invisible**: the
+frontend catches the failed lookup and returns an empty array, so the UI reads "no matches" rather
+than "search is off". Ask what each omitted service was load-bearing for, then exercise the feature
+rather than the service.
+
+Adding it back turned up two more:
+
+- **The published frontend image omits the index definitions its own startup code reads.** Its
+  Dockerfile copies two migration directories into the standalone output but not
+  `lib/quickwit/indexes`, so the app logged "Quickwit indexes directory not found" and created
+  nothing. The three files are vendored at the image's tag with a README saying to re-fetch on a
+  bump. Check that an image contains the data files its code expects, not just its binaries.
+- **A one-shot connection at boot turns a startup race into a permanent outage.** The API server
+  tries Quickwit exactly once, logs "Quickwit not available - skipping spans indexer workers" on
+  failure, and never retries. On Railway it lost the DNS race against its sibling and search stayed
+  dead for the life of the container. The entrypoint's wait list is the fix, and the lesson is to
+  wait for every dependency an app connects to **without retrying**, not just its databases.
+
+Also worth copying: the sign-in guard accepts **any** of the five identity providers Laminar
+supports, with the variable groups mirroring upstream's own checks, and a partial group counting as
+unconfigured. The first version demanded GitHub specifically, which would have forced a team on
+Google or Okta to set `ALLOW_PASSWORDLESS_SIGNIN=true` and read as opting into an open deployment
+when they had a perfectly good provider. When you gate on a provider, gate on all of them.
 
 Two more, found at publish time. **The marketplace readme pipeline strips `<angle-bracket>`
 placeholders as HTML, even inside backticks**, so `https://<frontend-domain>/api/auth/callback/github`
@@ -618,6 +645,10 @@ Variables / templates
 - A server hardcoded to `0.0.0.0` is unreachable over the private network. A `socat` `TCP6-LISTEN` bridge in the wrapper fixes it without patching the app. For Node, `HOSTNAME` is injected at run time and must be exported in the entrypoint, not set in the Dockerfile.
 - `${{secret(N, "alphabet")}}` takes a second argument, which is how you generate hex or base64-safe keys.
 - The marketplace readme strips `<angle-bracket>` placeholders as HTML even inside backticks, silently mangling example URLs. Use `YOUR-DOMAIN`-style placeholders and read the stored `readme` back.
+- The API access token in `~/.railway/config.json` expires after about an hour and mutations then fail with "Not Authorized", exactly like a scope problem. Run any `railway` CLI command to refresh it first.
+- There is **no** way to refresh a published template's config in place: `templateGenerate` takes only a projectId. To change a template's services and keep its marketplace code, delete the old template then publish the regenerated one, which slugs the same name back to the same code. Check the deployment count first.
+- Wait for every dependency an app connects to **once at boot without retrying**, not just its databases: losing that race disables the feature for the life of the container, usually silently.
+- Verify a feature, not the presence of its service. A missing search backend can return an empty result set that reads as "no matches".
 - Template generation **preserves** `${{...}}` references and `${{secret(N)}}` but nulls literal defaults. Wire inter-service hosts/URLs/shared secrets as references. Bake fixed constants into wrapper images or restore them as defaults through change sets/the composer before publishing; deployers should not have to type internal wiring or Dockerfile paths.
 - Build a repo service from a subdirectory with `serviceInstanceUpdate(input:{rootDirectory:"<svc>"})` (preserved in the template) instead of a `RAILWAY_DOCKERFILE_PATH` variable (nulled into a required composer field).
 - Finalize a template name through `metadata.name` in a template change set or the dashboard before publication. Renaming the reference project and regenerating was an older workaround, not a requirement. Publish slugs the name into the code.
@@ -665,7 +696,7 @@ Docs
 | Notesnook | `notesnook-sync-server` | mongo (7.0.12, single-node RS), minio (+mc), identity/notesnook-sync/sse/monograph (streetwriters images) — 6 services, each built from its own `rootDirectory` | Every app on Railway's `PORT` 8080 (image `PORT` env is overridden); single-node Mongo advertises `localhost` + clients `directConnection=true` (else ReplicaSetGhost); thin wrappers bake the fixed constants so the composer is two optional fields; all wiring by references, shared secret + MinIO creds via `${{secret()}}`/service refs; presigned attachments against the public MinIO domain, data in `/data/s3`; verified with the real signup/token/attachment path |
 | Pipecat | `pipecat` | one Python 3.12.14 / Pipecat 1.8.1 service: session API, bot processes and bundled browser client; external Daily WebRTC; no database or volume | Password-protected, one active session/worker/replica; OpenAI/Gemini/Grok native voice, OpenRouter/Ollama STT–LLM–TTS; conditional key validation before paid room creation; short-lived room tokens and cleanup; Ollama endpoint is not bundled inference; readiness and mocked adapters are not live-provider proof (§5.11) |
 | OpenPencil | `openpencil` | public Caddy gateway, private digest-pinned v0.8.4 prerelease Rust web host, 1024 MB volume at `/data` | `admin` + generated password; one shared `/data/workspace.op`; File → Save persists, Save As exports, no autosave; exact origins and private control endpoints; browser-local AI keys, shared server credential snapshots disabled; 80 tests and real save/redeploy checks, no live AI-provider validation (§5.12) |
-| Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.2.4`), clickhouse-server 26.5, postgres 16 — 4 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` cut seven services to four; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint refuses to boot without it; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok` (§5.15) |
+| Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.2.4`), clickhouse-server 26.5, quickwit v0.8.2, postgres 16 — 5 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` cut seven services to four; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint refuses to boot without it; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok` (§5.15) |
 | HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.8.0`), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 
