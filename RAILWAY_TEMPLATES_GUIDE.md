@@ -473,6 +473,73 @@ Initial IaC provisioning did not establish the reference's intended daily schedu
 
 Verify through the product's own API and assert on bodies, not status codes: HertzBeat answers bad credentials with **HTTP 200** and `{"msg":"Incorrect Account or Password","code":5}`. Creating a monitor uses **`paramValue`**, not `value`; the wrong key returns "Params field host is required.". To prove the metric write path when the time-series database is private, either read it back through the app — its history endpoint refuses when the store is unreachable, so a success code is itself proof — or attach a domain to the store for a single query and delete it again.
 
+### 5.15 An IPv4-only server, a login page with no password, and five platform traps (Laminar)
+
+[Laminar](https://github.com/lmnr-ai/lmnr) built as four services (Next.js frontend, Rust
+app-server, ClickHouse, PostgreSQL) with **two required composer fields** and everything else
+wired. Built and one-click verified on 9 September 2026; not published at the time of writing.
+The interesting parts:
+
+- **Find the project's own "lite" switch before adding services.** `ENVIRONMENT=LITE` turns
+  RabbitMQ, Redis and Quickwit from dependencies into no-ops, each gated purely on its URL
+  variable being present: the API server falls back to an in-memory cache and in-process span
+  processing. Four services instead of seven, at the cost of one feature (Quickwit-backed
+  full-text search). Read the feature-flag file, not the compose file, to find these.
+- **A server that binds `0.0.0.0` is invisible on Railway's private network, and no amount of
+  configuration fixes it.** Laminar's app-server hardcodes `.bind(("0.0.0.0", port))` on all three
+  listeners. The wrapper installs `socat` and runs two self-restarting bridges,
+  `TCP6-LISTEN:8100 -> TCP4:127.0.0.1:$PORT` and `:8102 -> :$CONSUMER_PORT`, and the frontend
+  points at those ports on the private domain. **Public** routing to an IPv4-only bind is fine, so
+  only service-to-service traffic needs the bridge. During a local rehearsal socat's `TCP6-LISTEN`
+  also accepts IPv4-mapped connections, so the same port exercises the real code path on a plain
+  docker network.
+- **A Node app's bind address cannot be set in the Dockerfile.** Next.js binds whatever `HOSTNAME`
+  says, and both Docker and Railway inject `HOSTNAME` with the container's own hostname at run
+  time, overriding the image's `ENV`. `export HOSTNAME=::` has to happen inside the entrypoint.
+- **Check how the project authenticates when nothing is configured.** Laminar's self-hosted
+  sign-in accepts **any email address with no password** when no identity provider is set, which
+  on a public URL is an open door. Configuring GitHub OAuth unmounts that plugin automatically, so
+  the template makes the two GitHub values required and the entrypoint refuses to boot without
+  them unless an explicit `ALLOW_PASSWORDLESS_SIGNIN=true` opts in. Deploy order for the operator
+  is documented, because the OAuth callback needs a domain that does not exist until after the
+  first deploy: create the app with a placeholder, deploy, then fix the callback.
+- **Look for endpoints that trust a proxy in front of them.** The realtime stream carries an
+  upstream comment saying auth "is handled by middleware on Next.js", so it authenticates nothing
+  itself and must never get a public domain. Meanwhile OTLP ingest over **HTTP** is the SDK
+  default, so the gRPC port needs no domain either.
+- **Let the app do its own migrations, and wait for its stores.** The frontend applies the
+  Postgres migrations, ~61 ClickHouse migrations, two dictionaries and the seed data on boot, and
+  rethrows if ClickHouse is missing. Its entrypoint waits for Postgres on TCP and ClickHouse on
+  HTTP `/ping`, which turns a first-boot crash loop into a slower first boot (~4.5 minutes;
+  seconds thereafter).
+- **`secret()` takes an alphabet.** `${{secret(64, "abcdef0123456789")}}` produces the 64
+  hex characters an AEAD key needs. No derivation trick required, and the generated call survives
+  into the template.
+
+#### Five platform traps this template walked into
+
+Each one presents as an application bug. Check these before debugging the app:
+
+1. **`healthcheckPath` accepts only letters, digits, `_` and `/`.** A `.` or `-` returns
+   "Error in healthcheckPath - Invalid input", so `/sign-in` and `/robots.txt` are both unusable.
+2. **`healthcheckPath: null` is silently ignored; `""` clears it.** The mutation returns `true`
+   either way, so a stale failing path keeps breaking deploys after you think you removed it.
+3. **A failing healthcheck holds the deploy in DEPLOYING for the whole timeout, then FAILED, and
+   the public domain 404s throughout** — so you cannot probe for a working path until it is already
+   healthy. Clear the healthcheck, deploy, probe the live domain, then set what you verified. A
+   **redirect counts as a failure**: a root that 307s to a login page is not a healthcheck.
+4. **`serviceInstanceDeployV2(serviceId, environmentId)` rebuilds the commit the service already
+   has**, not the branch head. Push a fix, redeploy, and you rebuild the old code with no warning.
+   Pass `commitSha:` and verify with `deployments { meta }`, which carries `commitHash`.
+5. **`serviceCreate(input: {source: {repo}})` is not enough to generate a template.**
+   `railway templates create` fails with "Service <name> does not have a source that can be used to
+   generate a template" and names only the first service alphabetically even when all are affected.
+   Call `serviceConnect(id, input: {repo, branch: "main"})` on each; it preserves `rootDirectory`.
+
+One more, on authentication to the API itself: `~/.railway/config.json` keeps a four-character stub
+in `user.token` and the real bearer token in `user.accessToken`. Queries for **published** templates
+succeed unauthenticated, which hides a bad token until your first mutation returns "Not Authorized".
+
 ---
 
 ## 6. Documentation set
@@ -540,6 +607,13 @@ Variables / templates
 - An app's `/actuator/**` or equivalent admin path may sit behind its own auth and answer the platform healthcheck with 401. Open just the health path, or use a route the app already leaves unauthenticated.
 - Credentials read from a file inside the image, rather than a database, must be rewritten by the entrypoint from a generated variable, or every deployment ships a known password. Warn that in-app password changes then do not survive a redeploy.
 - Assert on response bodies: some APIs answer a failed login with HTTP 200 and an error code in the payload.
+- `healthcheckPath` allows only `[A-Za-z0-9_/]`: a dot or hyphen is rejected outright, and `null` does not clear the field while `""` does. A redirect fails the check, so never point it at a root that bounces to a login page.
+- A failing healthcheck keeps the domain 404ing for the whole timeout, so clear it, deploy, probe, then set the path you verified.
+- `serviceInstanceDeployV2` rebuilds the service's existing commit; pass `commitSha` or you silently redeploy the old code. Confirm with `deployments { meta }`.
+- After `serviceCreate` with a repo source, call `serviceConnect(id, input:{repo, branch})` or template generation refuses the project.
+- Check what an app's login does with **no** identity provider configured. More than one accepts any email with no password in "self-hosted" mode, which is unacceptable on a public URL: require OAuth and have the entrypoint refuse to boot without it.
+- A server hardcoded to `0.0.0.0` is unreachable over the private network. A `socat` `TCP6-LISTEN` bridge in the wrapper fixes it without patching the app. For Node, `HOSTNAME` is injected at run time and must be exported in the entrypoint, not set in the Dockerfile.
+- `${{secret(N, "alphabet")}}` takes a second argument, which is how you generate hex or base64-safe keys.
 - Template generation **preserves** `${{...}}` references and `${{secret(N)}}` but nulls literal defaults. Wire inter-service hosts/URLs/shared secrets as references. Bake fixed constants into wrapper images or restore them as defaults through change sets/the composer before publishing; deployers should not have to type internal wiring or Dockerfile paths.
 - Build a repo service from a subdirectory with `serviceInstanceUpdate(input:{rootDirectory:"<svc>"})` (preserved in the template) instead of a `RAILWAY_DOCKERFILE_PATH` variable (nulled into a required composer field).
 - Finalize a template name through `metadata.name` in a template change set or the dashboard before publication. Renaming the reference project and regenerating was an older workaround, not a requirement. Publish slugs the name into the code.
