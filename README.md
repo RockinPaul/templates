@@ -20,5 +20,6 @@ Template repositories built with it:
 | OpenPencil | https://railway.com/deploy/openpencil | [openpencil-railway-template](https://github.com/RockinPaul/openpencil-railway-template) |
 | Persistent mise Workspace | https://railway.com/deploy/persistent-mise-workspace | [mise-railway-template](https://github.com/RockinPaul/mise-railway-template) |
 | Apache HertzBeat | https://railway.com/deploy/apache-hertzbeat | [hertzbeat_railway_template](https://github.com/RockinPaul/hertzbeat_railway_template) |
+| Laminar | https://railway.com/deploy/laminar | [lmnr_railway_template](https://github.com/RockinPaul/lmnr_railway_template) |
 
 The September 9 additions include component patterns in guide sections 5.11–5.13 and case-file entries in section 8. Section 3.9.1 records the verified CLI/API template-editing workflow; marketplace metadata and defaults are not limited to manual dashboard editing.
