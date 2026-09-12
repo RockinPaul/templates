@@ -13,7 +13,7 @@ output to [`reports/`](../reports/):
 |---|---|
 | `reports/YYYY-MM-DD.md` | the report for that run |
 | `reports/YYYY-MM-DD.json` | the same data, machine-readable |
-| `reports/latest.md` / `latest.json` | mirrors of the newest run; the next run diffs against `latest.json` for its "Changes since the previous report" section |
+| `reports/latest.md` | a copy of the newest run, for a stable link; the next run diffs against the newest **dated** report older than itself |
 | `reports/README.md` | index of all reports with verdict counts |
 
 ### What it does, per template

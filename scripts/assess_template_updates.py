@@ -14,7 +14,7 @@ For every template listed in ``templates.yaml`` the script
    commits ahead, commits touching template-relevant paths, commits touching
    files the template patches, security / breaking-change keywords,
 5. turns the signals into a verdict with human-readable reasons, and
-6. writes ``reports/<date>.md``, ``reports/latest.md``, ``reports/latest.json``
+6. writes ``reports/<date>.md`` and ``reports/latest.md``
    and refreshes the index in ``reports/README.md``.
 
 Only ``git`` and the Python standard library are required at runtime, plus
@@ -631,7 +631,17 @@ def assess_upstream(cache: RepoCache, template: dict[str, Any], template_dir: Pa
     # ---- releases -----------------------------------------------------------
     tags = list_tags(repo, tag_pattern) if track_releases else []
     tags.sort(key=lambda t: version_key(t.tag))
-    pinned_is_pre = bool(res.pin_tag and is_prerelease(res.pin_tag))
+    # A tag name alone cannot decide this: upstreams ship pre-releases under
+    # stable-looking tags (CaviraOSS/LongMemory tags "Beta v1.3.0" as v1.3.0).
+    # The release object carries an explicit flag, so read it BEFORE the
+    # decisions below - `latest` and the `newer` filter both depend on it.
+    releases_api = github_releases(repo_name, token) if tags else {}
+    for t in tags:
+        api = releases_api.get(t.tag)
+        if api is not None:
+            t.prerelease = bool(api.get("prerelease")) or t.prerelease
+    pinned_is_pre = bool(res.pin_tag and is_prerelease(res.pin_tag)) or \
+        bool(res.pin_tag and releases_api.get(res.pin_tag, {}).get("prerelease"))
     if tags:
         stable = [t for t in tags if not t.prerelease] or tags
         latest = stable[-1]
@@ -651,7 +661,6 @@ def assess_upstream(cache: RepoCache, template: dict[str, Any], template_dir: Pa
                 continue
             newer.append(t)
     res.newer_releases_total = len(newer)
-    releases_api = github_releases(repo_name, token) if newer else {}
     for t in newer[-MAX_LISTED_RELEASES:][::-1]:
         api = releases_api.get(t.tag)
         if api:
@@ -983,8 +992,8 @@ def render_index(report_dir: Path) -> str:
     dated = sorted((p for p in report_dir.glob("*.md") if re.match(r"\d{4}-\d{2}-\d{2}\.md$", p.name)), reverse=True)
     out = ["# Template update assessment reports\n",
            "Weekly reports written by `scripts/assess_template_updates.py` (GitHub Actions, Fridays). "
-           "[latest.md](latest.md) always mirrors the newest report; [latest.json](latest.json) is the machine-readable state "
-           "the next run diffs against.\n",
+           "[latest.md](latest.md) always mirrors the newest report. Each run diffs against the newest **dated** "
+           "report older than itself, so the dated files are the state that matters.\n",
            "| Date | Update recommended | Review | Minor drift | Up to date | Unknown |", "|---|---:|---:|---:|---:|---:|"]
     for p in dated:
         js = report_dir / (p.stem + ".json")
@@ -1032,7 +1041,6 @@ def main() -> int:
 
     # the newest dated report older than this run (a re-run on the same day must not diff against itself)
     previous = None
-    latest_json = report_dir / "latest.json"
     older = sorted(p for p in report_dir.glob("*.json") if re.match(r"\d{4}-\d{2}-\d{2}\.json$", p.name) and p.stem < args.date)
     if older:
         try:
@@ -1087,7 +1095,6 @@ def main() -> int:
     (report_dir / f"{args.date}.md").write_text(report, encoding="utf-8")
     (report_dir / f"{args.date}.json").write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (report_dir / "latest.md").write_text(report, encoding="utf-8")
-    latest_json.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     (report_dir / "README.md").write_text(render_index(report_dir), encoding="utf-8")
 
     if args.summary:

@@ -39,15 +39,22 @@ jobs:
       - name: Assess upstream projects
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Passed through the environment rather than interpolated into the
+          # script below. A ${{ }} expression inside run: is substituted before
+          # the shell parses the line, so a crafted dispatch input would run as
+          # shell with this job's contents:write token.
+          ONLY: ${{ github.event.inputs.only }}
         run: |
           set -euo pipefail
           extra=()
-          if [ -n "${{ github.event.inputs.only }}" ]; then
-            extra+=(--only "${{ github.event.inputs.only }}")
+          if [ -n "${ONLY:-}" ]; then
+            extra+=(--only "$ONLY")
           fi
           python scripts/assess_template_updates.py --report-dir reports --cache-dir "$RUNNER_TEMP/assessment-cache" "${extra[@]}"
 
       - name: Commit the report
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -59,4 +66,4 @@ jobs:
           fi
           date="$(date -u +%F)"
           git commit -m "Template update assessment ${date}"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
+          git push origin "HEAD:$DEFAULT_BRANCH"

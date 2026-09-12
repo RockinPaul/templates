@@ -1,6 +1,6 @@
 {
   "date": "2026-09-12",
-  "generated_at": "2026-09-12T14:35:44+00:00",
+  "generated_at": "2026-09-12T15:09:12+00:00",
   "templates": [
     {
       "name": "Cognee AI Memory Platform with MCP",
@@ -389,7 +389,7 @@
               "date": "2026-09-12T01:13:39+08:00",
               "sha": "2ae2dbbb8f9ed9ffe1739ecf5abfe31a940ee50c",
               "prerelease": false,
-              "notes": "Release v0.4.43",
+              "notes": "## Changelog\n* b36906e6d512264c008f2fe5c1262c8e21b09c20 MUL-6967 perf(inbox): derive the unread badge from the summary endpoint, not the full list (#7924)\n* 24e200dca365fb978509dd376426c6ff9c6fecc5 MUL-7000: fix(agent): record Antigravity token usage (#7961)\n* 676245af632db866dcba2afb47f5e7d99abf53b5 MUL-7034: fix(server): keep the parent workdir when an automatic retry must start fresh (#8291)\n* 116761e505a0bdf246561d2a9186310558c6db0a MUL-7072 fix(github): retire reference-only PR links (#8245)\n* 378e3bd24b1bd59a2f5dd3d8d3b76b3ef2929a03 MUL-7154: unify the global radius system (#8175)\n* c036 …",
               "url": "https://github.com/multica-ai/multica/releases/tag/v0.4.43"
             },
             {
@@ -397,7 +397,7 @@
               "date": "2026-09-09T18:59:25+08:00",
               "sha": "76f59f5f1cd9b6e779d0d34c603407d5d4001bf7",
               "prerelease": false,
-              "notes": "Release v0.4.42",
+              "notes": "## Changelog\n* 261522e3e3d71516d6b34d7c5ab1ccc8a4669718 MUL-6788: perf(server): batch claim-path attachment and runtime lookups (#7696)\n* 074f5ab237f1c42cc3315199a7214d66d24ca722 MUL-6834: fix(codex): preserve token usage on cancelled turns (#7753)\n* cc758a74e149bb51d7e32581a811093340594306 MUL-6941 feat(daemon): record task phase latency (#7890)\n* ccd312c5e2a2285a0230ee8e2b2fad7dd5ca1ae0 MUL-7005 fix(wecom): settle a relayed reply's outcome once, after its last offer (#7953)\n* 8661e586f626f6c7686cfa15e1ea3373a1ad28a3 MUL-7063 fix(cursor): bound stalled runs after background shell launch (#805 …",
               "url": "https://github.com/multica-ai/multica/releases/tag/v0.4.42"
             }
           ],
@@ -452,8 +452,8 @@
           "security_hits": [],
           "breaking_hits_total": 0,
           "breaking_hits": [],
-          "latest_release": "v1.3.0",
-          "latest_release_date": "2025-12-20T22:10:55+05:30",
+          "latest_release": "v1.2.3",
+          "latest_release_date": "2025-12-12T21:01:31+05:30",
           "newer_releases_total": 0,
           "newer_releases": [],
           "pypi_latest": null,
@@ -486,12 +486,12 @@
           "pin_source": "Dockerfile",
           "pin_sha": "b682dad740f24e85ce9a48d23babc6780dd476ac",
           "pin_tag": "v1.4.478",
-          "pin_date": "2026-09-07T19:17:43+00:00",
+          "pin_date": "2026-09-07T19:17:43Z",
           "pin_age_days": 4,
           "pin_mismatch": [],
           "default_branch": "main",
           "head_sha": "b682dad740f24e85ce9a48d23babc6780dd476ac",
-          "head_date": "2026-09-07T19:17:43+00:00",
+          "head_date": "2026-09-07T19:17:43Z",
           "commits_ahead": 0,
           "commits_behind": 0,
           "relevant_commits_total": 0,
@@ -504,7 +504,7 @@
           "breaking_hits_total": 0,
           "breaking_hits": [],
           "latest_release": "v1.4.478",
-          "latest_release_date": "2026-09-07T19:17:43+00:00",
+          "latest_release_date": "2026-09-07T19:17:43Z",
           "newer_releases_total": 0,
           "newer_releases": [],
           "pypi_latest": null,
@@ -683,7 +683,7 @@
               "date": "2026-09-10T15:08:16+02:00",
               "sha": "56a1c29d514d8f7d3b5feec455c7b57de358b1d3",
               "prerelease": false,
-              "notes": "Bump version to v0.64.3",
+              "notes": "## Changelog\n* 56a1c29d514d8f7d3b5feec455c7b57de358b1d3 Bump version to v0.64.3\n* a9aa723823f0be6c3c3a1ee6cfa73764645a0c47 Merge pull request #782 from tiendungdev/fix/issue-777-admission-diagnostics\n* 817373364c1ee74f394f4b8b41c7df499eb811f6 Merge pull request #788 from pbednarcik/fix/checkout-admission-off-gate\n* f669ea7c9762fe8e2be2c057ac37bbe298a6f3b2 fix(indexer): address checkout admission review feedback\n* 7447f3ac56c08fc5ed3e8b530572b4b37e7fc5b1 fix(indexer): identify checkout mutation admission contention\n* 87b31a4028885f92a46f47168b9c91a470751e87 fix(indexer): queue checkout mutation …",
               "url": "https://github.com/zzet/gortex/releases/tag/v0.64.3"
             },
             {
@@ -691,7 +691,7 @@
               "date": "2026-09-09T22:59:01+02:00",
               "sha": "ebfb6b74b8e1ab8fc023ad2cb4f3d7316d12ddf6",
               "prerelease": false,
-              "notes": "Bump version to v0.64.2",
+              "notes": "## Changelog\n* ebfb6b74b8e1ab8fc023ad2cb4f3d7316d12ddf6 Bump version to v0.64.2\n* 6f631cf9a1dab259d17c658e2bfc78d5bb468d1f Merge commit from fork\n* c6ac55f96f1ce69dbd145a4d0cf124cad3de2810 Merge pull request #774 from zzet/fix/issue-767-worktree-readiness\n* 831169a43f7f52efe7d10c28cd43928c34be74b7 Merge pull request #775 from zzet/fix/read-installed-gortex-skills\n* 11a00fead2ef5c0f3762f271672513e8c3759a20 Merge pull request #776 from zzet/test/receiver-rebind-cross-join-locks\n* f729ffaec9a84e7d99dc5a9bda31874847a78cd0 Merge pull request #785 from pbednarcik/fix/windows-detach-no-window\n* 3370c …",
               "url": "https://github.com/zzet/gortex/releases/tag/v0.64.2"
             }
           ],
@@ -776,7 +776,7 @@
           "pin_mismatch": [],
           "default_branch": "main",
           "head_sha": "4cbba6a54689f68feeec4cbde7c76a0ddc755717",
-          "head_date": "2026-09-05T17:24:01+00:00",
+          "head_date": "2026-09-05T17:24:01Z",
           "commits_ahead": 1,
           "commits_behind": 1,
           "relevant_commits_total": 1,
@@ -798,7 +798,7 @@
           "breaking_hits_total": 0,
           "breaking_hits": [],
           "latest_release": "v1.13.1",
-          "latest_release_date": "2026-09-05T17:33:33+00:00",
+          "latest_release_date": "2026-09-05T17:33:33Z",
           "newer_releases_total": 0,
           "newer_releases": [],
           "pypi_latest": null,
@@ -1354,7 +1354,7 @@
               "date": "2026-09-11T22:42:48-04:00",
               "sha": "f67c18afddbfb0609991cd6830355713baaad01b",
               "prerelease": false,
-              "notes": "v1.10.0",
+              "notes": "### Added\n\n- `SmallestTTSService` now uses Smallest AI's continuation API: text fragments within the same LLM turn share a `context_id` so the server joins them into one continuous generation instead of resetting prosody on each request. Added an optional `max_buffer_delay_ms` setting to control the server-side buffering window.\n  (PR [#5626](https://github.com/pipecat-ai/pipecat/pull/5626))\n\n- Added `LiveKitParams.audio_out_queue_size_ms` to configure the outgoing `rtc.AudioSource` buffer size. Defaults to LiveKit's 1000 ms, so existing behaviour is unchanged.\n  (PR [#5699](https://github.com …",
               "url": "https://github.com/pipecat-ai/pipecat/releases/tag/v1.10.0"
             },
             {
@@ -1362,7 +1362,7 @@
               "date": "2026-09-10T20:03:30-07:00",
               "sha": "04986090da1d15077a524f68c17b5b1cee99f774",
               "prerelease": false,
-              "notes": "v1.9.0",
+              "notes": "### Added\n\n- Added `LatencyBreakdown.contributions`, a timeline of the user-to-bot interval whose durations sum to the measured latency. It names the time no service reports — VAD silence, turn detection, turn-completion markers and holds, sentence aggregation, and function handlers — and attributes time a setting governs to that setting rather than to the service it runs inside.\n\n  The first thing the bot says is measured too, from where `StartupTimingObserver` stops — the pipeline ready with a client on it — so the two reports meet rather than overlap. Waiting to be asked is usually most of …",
               "url": "https://github.com/pipecat-ai/pipecat/releases/tag/v1.9.0"
             }
           ],
@@ -1598,7 +1598,7 @@
           "pin_mismatch": [],
           "default_branch": "main",
           "head_sha": "dc2b00bba2d3c25733b65b33f9328bbe98667d2a",
-          "head_date": "2026-09-12T13:33:52+00:00",
+          "head_date": "2026-09-12T13:33:52Z",
           "commits_ahead": 96,
           "commits_behind": 0,
           "relevant_commits_total": 13,
@@ -1709,23 +1709,23 @@
             }
           ],
           "latest_release": "v2026.9.5",
-          "latest_release_date": "2026-09-10T21:17:52+00:00",
+          "latest_release_date": "2026-09-10T21:17:52Z",
           "newer_releases_total": 2,
           "newer_releases": [
             {
               "tag": "v2026.9.5",
-              "date": "2026-09-10T21:17:52+00:00",
+              "date": "2026-09-10T21:17:52Z",
               "sha": "016fcd16a991c85e099d4f0b571bc44978a9eb94",
               "prerelease": false,
-              "notes": "- **(bootstrap)** support current-host macOS defaults by @azohra in [#12983](https://github.com/jdx/mise/pull/12983)\n- **(bootstrap)** extend friendly macos preferences by @jdx in [#13032](https://github.com/jdx/mise/pull/13032)\n- **(bootstrap)** patch nested macOS preference values by @azohra in [#12984](https://github.com/jdx/mise/pull/12984)\n- **(bootstrap)** support pre-packages file phases by @jdx in [#13052](https://github.com/jdx/mise/pull/13052)\n- **(brew-cask)** support structured set_permissions flight steps by @azohra in [#13043](https://github.com/jdx/mise/pull/13043)\n- **(dotfiles …",
+              "notes": "This release deepens macOS bootstrap support with current-host and nested defaults, lets dotfiles and tasks adapt to the platform and to parsed arguments, and adds an opt-in trial of complete lockfile generation. It also carries a batch of install progress, self-update, brew-cask, and sandbox fixes.\n\n## Added\n- **bootstrap:** New `[[bootstrap.macos.defaults_entries]]` blocks let you set macOS preferences explicitly with `domain`, `key`, `value`, and an optional `host` (`any` by default, or `current`), covering preferences normally written via `defaults -currentHost` while keeping the existing …",
               "url": "https://github.com/jdx/mise/releases/tag/v2026.9.5"
             },
             {
               "tag": "v2026.9.4",
-              "date": "2026-09-09T19:24:24+00:00",
+              "date": "2026-09-09T19:24:24Z",
               "sha": "794948606e02cde091653a165291b06cae43c352",
               "prerelease": false,
-              "notes": "- **(bootstrap)** add package environment selectors by @jdx in [#12956](https://github.com/jdx/mise/pull/12956)\n- **(bootstrap)** add nix packages and nixos export by @jdx in [#13013](https://github.com/jdx/mise/pull/13013)\n- **(packslip)** activate declared man pages by @jdx in [#13012](https://github.com/jdx/mise/pull/13012)\n- **(task)** add task-scoped quiet setting by @jdx in [#12980](https://github.com/jdx/mise/pull/12980)\n\n- **(backend)** handle unsupported ARM32 artifacts safely by @jdx in [#13004](https://github.com/jdx/mise/pull/13004)\n- **(bootstrap)** sign hard-linked Mach-O aliases …",
+              "notes": "This release expands the bootstrap package model with Nix support and environment selectors, teaches packslip tools to ship man pages, and adds a task-scoped quiet setting. It also carries a wide batch of packslip, bootstrap, and cross-platform fixes plus a major speedup to dotfiles history rebuilds.\n\n## Added\n- **bootstrap:** Nix is now a built-in `[bootstrap.packages]` manager on Linux and macOS. Declare packages with the `nix:` prefix and apply them through your normal Nix profile; the manager supports use, apply, status JSON, and targeted upgrades while leaving Nix sources, caches, trust, …",
               "url": "https://github.com/jdx/mise/releases/tag/v2026.9.4"
             }
           ],
