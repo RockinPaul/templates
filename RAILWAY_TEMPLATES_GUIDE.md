@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing fourteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat** and **Laminar**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing fifteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat** and **Laminar**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -619,6 +619,50 @@ Re-cut as a thin repo it is 228 KB and ten files — `Dockerfile`, `entrypoint.s
 
 ---
 
+### 5.17 A zero-input two-service template, and what nulls on generation (LongMemory)
+
+LongMemory is a persistent memory store for LLM apps: a Node server exposing `/v1/*` and an MCP
+endpoint, plus a separate Next.js dashboard. SQLite on one volume, no external database. It is the
+lightest shape here that still ships a UI, and it published with **zero composer fields**.
+
+- **Pin a commit, not a tag, when the tags lie.** Upstream's newest release was `v1.3.0` while
+  `main` sat 155 commits ahead *and* `package.json` on `main` reported `1.0.0` — a lower version
+  than the tag. There is nothing coherent to pin, so both Dockerfiles fetch one commit and assert
+  its SHA. The GHCR image referenced by upstream's own compose file answers `DENIED`, so building
+  from source was unavoidable; that is now the second template in this guide where "no published
+  image" did **not** mean "fork it" (§5.16).
+- **`LONGMEMORY_HOST=::` was the entire IPv6 fix.** The server reads a host variable and calls
+  `.listen(port, host)`, and Node gives `::` a dual-stack socket, so no `socat` bridge was needed —
+  worth checking before reaching for Laminar's pattern (§5.15). An IPv4-only default is reachable
+  from the public edge and invisible to a sibling service.
+- **The Next.js `HOSTNAME` trap, confirmed a second time.** Docker injects `HOSTNAME` exactly as
+  Railway does, so the local rehearsal reproduced it for free: the container received
+  `HOSTNAME=4d61371ef814`, the entrypoint's `export HOSTNAME=::` won, and `netstat` showed
+  `:::3000`. Test this locally rather than discovering it in a failed deploy.
+- **Literal defaults are nulled by generation; references survive.** `PORT=8080` and
+  `OPENAI_API_KEY=""` both came back as `defaultValue: null, isOptional: false` — that is, REQUIRED
+  fields with no value, which would have made a one-click deploy ask the user for a port number.
+  `${{secret(48)}}` and `${{service.VAR}}` came through untouched. **The route to zero composer
+  fields is therefore to bake constants into the image and delete the service variable**, then keep
+  only generated secrets and cross-service references in the reference project.
+- **`healthcheckPath` in `railway.json` is not captured by generation.** railway.json applies at
+  deploy time; generation reads the service instance, which was still null. Set it explicitly with
+  `serviceInstanceUpdate` before generating, and keep railway.json too so deployers get it either
+  way (§5.16 records the same trap from the opposite direction).
+- **A degraded feature that never errors needs measuring, not assuming.** Without an embedding
+  credential the store falls back to a `synthetic` provider that sums SHA-256 digests of tokens into
+  a vector. It never raises. Measured: a query repeating a memory's own words scored 0.656 and
+  ranked first, unrelated memories all clustered at ~0.265, and in `strict` mode the confidence
+  floor then hid the matching memory completely — "Rust borrow checker" returned an unrelated
+  sentence about a cat and not the Rust one, while `associative` mode did return it. The entrypoint
+  now selects a provider from whichever key is present and logs a loud warning otherwise, and the
+  listing says plainly that recall is lexical until a key is set.
+- **Check whether an app's `user_id` is a tenancy boundary before implying it is.** Here it is not:
+  a recall issued as one `user_id` returned memories ingested under two others, all in one store
+  with `worlds: 1`. That belongs in the listing's security notes, not discovered by a deployer.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -711,6 +755,11 @@ Variables / templates
 - Set volume size explicitly. Also verify resource caps, replicas, sleeping, watch patterns and backup schedules in the actual fresh deployment, not only the reference project or authoring file.
 - Omitted native-IaC variables can mean **delete**, not preserve. Use explicit `preserve()` markers; for arbitrary owner names, fail closed on scoped discovery errors and retain the native destructive-apply guard.
 - API/CLI success may precede provisioning, volume attachment or SSH readiness. Poll the workflow and resource state before retrying mutations; do not create duplicates because one readback is stale.
+- **Literal variable defaults are nulled by template generation; `${{secret()}}` and `${{service.VAR}}` survive.** A literal becomes `defaultValue: null, isOptional: false`, i.e. a required composer field with no value. Bake constants into the image and delete the variable to reach zero-input templates.
+- `healthcheckPath` set only in `railway.json` is not captured by generation; set it on the service instance too.
+- `--image` rejects `avatars.githubusercontent.com` with "Invalid image URL", with or without `?v=4`; `raw.githubusercontent.com` is accepted.
+- Build GraphQL bodies in Python, never by shell interpolation. A `"$SVC:PORT"` loop corrupted a serviceId into a filesystem path and the API answered **"Not Authorized"**, which reads as a permissions failure and is not; the same mutation with a Python-built body succeeded.
+- Template **name** editing lives only on `backboard.railway.com/graphql/internal` (`templateChangeSetStage`/`Apply`); `/graphql/v2` does not know `TemplatePatch`.
 - "You have been blocked from publishing templates" is **workspace-wide**, triggered by one template Railway has hidden administratively, and blocks readme edits to every other template. Nothing in the API says which template or that it is hidden. Only Railway lifts it; ask on Central Station.
 - Publish through `railway templates publish|update`. A hand-rolled `templatePublish` against the public GraphQL endpoint kept reporting that block after it had been lifted; expiry, User-Agent and template identity were all ruled out.
 - **Check your own notes before deciding a problem is new.** Three earlier templates had been published with the CLI and the exact command was recorded; reaching for schema introspection and a raw mutation instead is what produced the false signal above.
@@ -752,6 +801,7 @@ Docs
 | HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.8.0`), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
 | Fabric | `fabric` | one Go service built from pinned upstream source (no upstream image), volume at `/home/appuser/.config/fabric` | **Built from source without forking.** A 190 MB fork pinned 27 releases behind became a 228 KB repo whose Dockerfile clones a pinned tag, asserts that tag's commit so a moved tag fails the build, and applies an 84-line patch — `/health` plus its auth exemption, `text/readystream` → `text/event-stream` (upstream's own swagger already said so), and CORS moved off hardcoded `localhost:5173` to `FABRIC_ALLOWED_ORIGIN`; the bump to v1.4.478 brought two upstream security fixes and forced Go 1.26; Fabric reads providers from `~/.config/fabric/.env` not the process env, so keys land in plaintext on the volume; `railway.json` supplies the healthcheck the reference project lacked, and that reference project later vanished (§5.16) |
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
+| LongMemory | `longmemory` | longmemory (Node server, `/v1/*` + `/mcp`, SQLite on a `/data` volume) and dashboard (Next.js) — 2 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` prompted for nothing.** Pinned by commit SHA because the newest tag is 155 commits behind a `main` that reports a lower version, and the GHCR image is not public; `LONGMEMORY_HOST=::` gave Node a dual-stack socket with no socat needed; the dashboard entrypoint exports `HOSTNAME=::` because Railway injects it at run time; the server ships an EMPTY api key so the entrypoint refuses to boot without one; db in a `/data/db` subdirectory with a root chown then `gosu` drop; literal defaults (`PORT=8080`, `""`) were nulled into required fields by generation so constants were baked into the images instead; without an embedding key recall is lexical and `strict` mode can hide the matching memory (§5.17) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
