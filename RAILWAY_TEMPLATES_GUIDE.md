@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing thirteen of them in September 2026: **cognee**, **Multica**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat** and **Laminar**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing fourteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat** and **Laminar**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -572,6 +572,53 @@ stored `readme` back after publishing. And on authentication to the API itself:
 `user.accessToken`. Queries for **published** templates succeed unauthenticated, which hides a bad
 token until your first mutation returns "Not Authorized".
 
+### 5.16 Building from source with no upstream image, without carrying a fork (Fabric)
+
+Fabric publishes **no container image** — nothing on GHCR, and Docker Hub's `fabric` is
+Hyperledger's — so building from source is unavoidable. Forking is not, and the two get conflated.
+
+The template's repo started as a full fork of `danielmiessler/fabric`: ~190 MB of upstream history,
+pinned at v1.4.451, with the Railway changes made as direct edits to upstream's Go files. That shape
+has one failure mode and it arrived on schedule: because a bump means rebasing your edits across
+upstream's history, it did not happen, and the template sat **27 releases and four months** behind.
+Re-cut as a thin repo it is 228 KB and ten files — `Dockerfile`, `entrypoint.sh`, one patch,
+`railway.json` and docs — and a version bump is two `ARG` lines.
+
+- **Clone a pinned tag in the Dockerfile and assert its commit.** `git clone --depth 1 --branch
+  v1.4.478`, then compare `git rev-parse HEAD` with a pinned `FABRIC_COMMIT` and fail the build on a
+  mismatch. A tag is mutable; this makes a moved tag a build error instead of a silent substitution.
+- **Carry your changes as patches, not edits.** `patches/*.patch` applied with `git apply --verbose`
+  keeps the boundary between upstream's code and yours legible, and each hunk stays independently
+  upstreamable. Fabric's patch is 84 lines and holds three things upstream has not taken: an
+  unauthenticated `/health` route with its middleware exemption; `text/readystream` →
+  **`text/event-stream`** on the streaming chat endpoint, which is a plain bug since upstream's own
+  swagger annotation already says event-stream; and the CORS origin, hardcoded upstream to
+  `http://localhost:5173`, moved to `FABRIC_ALLOWED_ORIGIN` (default `*`, safe here because auth is
+  a header rather than a cookie).
+- **Staying current is a security argument, not housekeeping.** The v1.4.451 → v1.4.478 bump picked
+  up two upstream fixes for free: `requireAPIKeyForBind` refuses a non-loopback bind with an empty
+  API key, and `APIKeyMiddleware` compares SHA-256 digests in constant time. It also required Go
+  **1.26** per upstream's `go.mod`, so the previously hand-pinned Go 1.25.9 could not build it —
+  pin the toolchain image as an `ARG` too, and expect to move it.
+- **Some apps ignore the process environment.** Fabric reads providers and defaults from
+  `~/.config/fabric/.env`, so the entrypoint has to write that file rather than pass variables
+  through. Consequence worth documenting for deployers: provider keys then sit in plain text on the
+  volume. Rewrite the file by grep-filter-and-append rather than `sed -i`, or a key containing a
+  slash or backslash corrupts it.
+- **Put deploy settings in `railway.json` at the repo root.** The reference project's service had
+  `healthcheckPath` null while the published template carried `/health`; regenerating from that
+  project would have silently dropped the healthcheck. A committed `railway.json` survives
+  regeneration and keeps the two in step.
+- **A reference project can disappear from under you.** Fabric's (`12b93c4f`) was gone when needed
+  for a regeneration — not deleted by this session. Nothing warns you; the template keeps working
+  because it is an independent object, but you cannot regenerate it. Treat the reference project as
+  reproducible infrastructure, and keep enough in the repo (`railway.json`, documented variables) to
+  rebuild it.
+- Archive the history before re-cutting: `git bundle create ~/fabric_fork_archive.bundle --all`
+  (148 MB, verified complete) restores the old fork with `git fetch <bundle> main` and a force-push.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -703,6 +750,7 @@ Docs
 | OpenPencil | `openpencil` | public Caddy gateway, private digest-pinned v0.8.4 prerelease Rust web host, 1024 MB volume at `/data` | `admin` + generated password; one shared `/data/workspace.op`; File → Save persists, Save As exports, no autosave; exact origins and private control endpoints; browser-local AI keys, shared server credential snapshots disabled; 80 tests and real save/redeploy checks, no live AI-provider validation (§5.12) |
 | Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.2.4`), clickhouse-server 26.5, quickwit v0.8.2, postgres 16 — 5 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` cut seven services to four; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint refuses to boot without it; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok` (§5.15) |
 | HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.8.0`), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
+| Fabric | `fabric` | one Go service built from pinned upstream source (no upstream image), volume at `/home/appuser/.config/fabric` | **Built from source without forking.** A 190 MB fork pinned 27 releases behind became a 228 KB repo whose Dockerfile clones a pinned tag, asserts that tag's commit so a moved tag fails the build, and applies an 84-line patch — `/health` plus its auth exemption, `text/readystream` → `text/event-stream` (upstream's own swagger already said so), and CORS moved off hardcoded `localhost:5173` to `FABRIC_ALLOWED_ORIGIN`; the bump to v1.4.478 brought two upstream security fixes and forced Go 1.26; Fabric reads providers from `~/.config/fabric/.env` not the process env, so keys land in plaintext on the volume; `railway.json` supplies the healthcheck the reference project lacked, and that reference project later vanished (§5.16) |
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
