@@ -24,4 +24,8 @@ Template repositories built with it:
 | Apache HertzBeat | https://railway.com/deploy/apache-hertzbeat | [hertzbeat_railway_template](https://github.com/RockinPaul/hertzbeat_railway_template) |
 | Laminar | https://railway.com/deploy/laminar | [lmnr_railway_template](https://github.com/RockinPaul/lmnr_railway_template) |
 
+## Weekly upstream update assessment
+
+[`scripts/assess_template_updates.py`](scripts/assess_template_updates.py) runs every Friday via [GitHub Actions](.github/workflows/weekly-template-assessment.yml), reads the upstream version each template repo pins, compares it with the upstream project's releases and default branch, and writes a report to [`reports/`](reports/) (newest: [`reports/latest.md`](reports/latest.md)). The list of templates and the pin locations live in [`templates.yaml`](templates.yaml); scoring rules and local usage are in [`scripts/README.md`](scripts/README.md).
+
 The September 9 additions include component patterns in guide sections 5.11–5.13 and case-file entries in section 8. Section 3.9.1 records the verified CLI/API template-editing workflow; marketplace metadata and defaults are not limited to manual dashboard editing.
