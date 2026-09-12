@@ -200,7 +200,7 @@ After filling the definition through either route:
    ```
    `--image` must be a URL (a local path fails with "Invalid image URL"); use a raw GitHub URL of an upstream screenshot or logo. Description longer than 75 characters is rejected. If upstream's banner is a GitHub **user-attachment** (`github.com/user-attachments/assets/…`) it is not a stable URL: curl gets 403 without a browser user agent and the redirect target is a signed S3 URL that expires in minutes. Download it with a browser UA, commit it to the template repo as `docs/cover.jpg`, and pass that raw URL (EverOS).
 4. One-click verification: create a short-named scratch project, confirm its exact linked ID, then run `railway deploy -t <code>`. If the template has empty required defaults the command prompts and dies without a TTY; pass `-v service.KEY=value`. Wait for the intended entry point to be ready and run §3.7 through the public domain for web apps or managed SSH for a private workspace. Check generated secrets' lengths without logging their values, then delete only the verified scratch project. Probe APIs with the **exact request bodies from your README**, not hand-typed ones: an EverOS `add` written from memory returned 422 "Field required: session_id" and then "messages.0.sender_id", which looks like a broken deploy but is only a wrong payload. Expect indexing lag: a keyword search right after a flush was empty for one to two seconds until the cascade worker had upserted the Markdown.
-5. Republishing later (new readme/description/image) is the same command; the code stays.
+5. Republishing later (new readme/description/image) is the same command; the code stays. Use the CLI for this rather than a hand-rolled `templatePublish` mutation — the raw endpoint can report a publishing block that is no longer in force (§4).
 
 ### 3.9.1 CLI/API authoring verified on OpenPencil and mise
 
@@ -259,6 +259,8 @@ Per template: a memory note with ids (project, environment, services, volumes, t
 - `railway deploy -t <code>` uses the template's defaults; missing defaults → interactive prompts → failure without a TTY.
 - Marketplace description ≤ 75 characters. `--image` is a URL. The overview readme has an expected structure (§6).
 - Deployers are notified of updates when the template repo's branch changes.
+- **One "hidden" template blocks publishing for the entire workspace.** Railway staff can mark a template hidden by an administrative action. While any template in a workspace carries that status, every publish for that workspace is refused with "You have been blocked from publishing templates. Please reach out to the team for more information." — including a readme-only edit to an unrelated template. Nothing in the API identifies which one: status stays `PUBLISHED`, it still appears in `templateSearch`, `health`/`activeProjects`/`projects`/`totalPayout` show no outlier, and there is no `isHidden` field. Only Railway can clear it. Ask on Central Station, which is the support channel for every plan below Enterprise (email is reserved for sales, security, abuse and privacy, and is documented as possibly unanswered otherwise).
+- **Diagnose publishing state with the CLI, never a hand-rolled mutation.** `railway templates publish|update` succeeded while a `templatePublish` mutation posted to `backboard.railway.com/graphql/v2` with `user.accessToken` kept returning the block error — eight minutes after the CLI had worked, and after Railway had actually lifted the block. Token expiry, `User-Agent` and template identity were each ruled out. The raw endpoint produces **false negatives**: it reported a block that no longer existed, and nearly sent a bug report contradicting the engineer who had just fixed it. Treat the CLI as the source of truth before escalating anything.
 
 ---
 
@@ -662,6 +664,9 @@ Variables / templates
 - Set volume size explicitly. Also verify resource caps, replicas, sleeping, watch patterns and backup schedules in the actual fresh deployment, not only the reference project or authoring file.
 - Omitted native-IaC variables can mean **delete**, not preserve. Use explicit `preserve()` markers; for arbitrary owner names, fail closed on scoped discovery errors and retain the native destructive-apply guard.
 - API/CLI success may precede provisioning, volume attachment or SSH readiness. Poll the workflow and resource state before retrying mutations; do not create duplicates because one readback is stale.
+- "You have been blocked from publishing templates" is **workspace-wide**, triggered by one template Railway has hidden administratively, and blocks readme edits to every other template. Nothing in the API says which template or that it is hidden. Only Railway lifts it; ask on Central Station.
+- Publish through `railway templates publish|update`. A hand-rolled `templatePublish` against the public GraphQL endpoint kept reporting that block after it had been lifted; expiry, User-Agent and template identity were all ruled out.
+- **Check your own notes before deciding a problem is new.** Three earlier templates had been published with the CLI and the exact command was recorded; reaching for schema introspection and a raw mutation instead is what produced the false signal above.
 
 Repos / CLI
 - `railway add -r` "You do not have access" → `serviceConnect`; new repos may be "Not Authorized" for ~40 min.
@@ -743,6 +748,6 @@ for s in cfg['services'].values():
 - [ ] Template definition read back: no empty non-optional values, no whitespace, secrets on the right keys, name final.
 - [ ] Explicit volume size, deployment limits, sleeping/replicas, watch patterns and backup schedules checked in the fresh copy; native IaC preview contains no unexpected variable deletion.
 - [ ] For persistent apps/workspaces: actual content and executable paths survive replacement; snapshot restore tested on disposable data, not merely snapshot creation.
-- [ ] Published with category, ≤ 75-char description, overview readme, image URL.
+- [ ] Published with category, ≤ 75-char description, overview readme, image URL — via the `railway templates` CLI, and confirmed by reading the saved overview back.
 - [ ] One-click deploy into a scratch project verified, then deleted.
 - [ ] Memory notes, plan file, cognee dataset updated; repo README button points at the real code.
