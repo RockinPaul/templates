@@ -1,0 +1,391 @@
+# Manifest for scripts/assess_template_updates.py.
+#
+# One entry per Railway template listed in README.md. Each template names the
+# upstream project(s) it wraps and tells the script where, inside the TEMPLATE
+# repository, the upstream version is pinned. The pin is read live from the
+# template repo on every run, so bumping a template needs no change here.
+#
+# Per upstream:
+#   name            label used in the report
+#   repo            GitHub owner/name of the upstream project
+#   kind            default pin kind: tag | commit | image-digest
+#   pins            list of {file, pattern[, kind][, image]} read from the template repo;
+#                   `pattern` is a Python regex with a (?P<version>...) group.
+#                   Several pins that should agree (e.g. two images of one release)
+#                   are all listed; the report flags a mismatch.
+#   tag_formats     how a pinned version string maps to an upstream git tag
+#                   ({version} is the value with any leading "v" stripped)
+#   tag_pattern     regex selecting which upstream tags count as releases
+#   releases        false for upstreams pinned by commit where tags are irrelevant
+#   relevant_paths  extra git pathspecs (glob) whose changes matter for the wrapper,
+#                   added to defaults.relevant_paths (defaults.exclude_paths are
+#                   always subtracted)
+#   patched_files_glob  glob (in the template repo) of patch files; the upstream
+#                   files they touch are watched separately (rebase risk)
+#   pypi            PyPI package to compare against, for pip-installed upstreams
+#   lookback_days   activity window used when there is no resolvable pin
+
+defaults:
+  lookback_days: 90
+  # test code never changes what a wrapper has to do
+  exclude_paths:
+    - "**/*_test.go"
+    - "**/*_test.py"
+    - "**/test_*.py"
+    - "**/*.test.*"
+    - "**/*.spec.*"
+    - "**/tests/**"
+    - "**/__tests__/**"
+    - "**/testdata/**"
+    - "**/e2e/**"
+  relevant_paths:
+    - "**/Dockerfile*"
+    - "**/docker-compose*"
+    - "**/compose*.y*ml"
+    - "**/.env*"
+    - "**/env.example"
+    - "**/*.env.example"
+    - "**/config.example.*"
+    - "**/entrypoint*"
+    - "deploy/**"
+    - "docker/**"
+    - "helm/**"
+    - "**/migrations/**"
+    - "**/alembic/**"
+    - "pyproject.toml"
+    - "package.json"
+    - "go.mod"
+    - "Cargo.toml"
+    - "**/requirements*.txt"
+    - "SECURITY.md"
+
+templates:
+  - name: Cognee AI Memory Platform with MCP
+    template_repo: RockinPaul/cognee_railway_template
+    deploy_url: https://railway.com/deploy/cognee-ai-memory-p-1
+    upstreams:
+      - name: cognee API image
+        repo: topoteretes/cognee
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^FROM\s+cognee/cognee:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "entrypoint.sh"
+          - "cognee/api/**"
+          - "cognee/infrastructure/databases/**"
+          - "cognee/base_config.py"
+      - name: cognee MCP image (built from main)
+        repo: topoteretes/cognee
+        kind: commit
+        releases: false
+        pins:
+          - file: Dockerfile.mcp
+            pattern: '^FROM\s+cognee/cognee-mcp:main-(?P<version>[0-9a-f]{7,40})'
+        relevant_paths:
+          - "cognee-mcp/**"
+
+  - name: Multica
+    template_repo: RockinPaul/multica_railway_template
+    deploy_url: https://railway.com/deploy/multica
+    upstreams:
+      - name: backend + web images
+        repo: multica-ai/multica
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^FROM\s+ghcr\.io/multica-ai/multica-backend:(?P<version>[^\s@]+)'
+          - file: Dockerfile.web
+            pattern: '^FROM\s+ghcr\.io/multica-ai/multica-web:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "SELF_HOSTING*.md"
+          - "apps/server/**/migrations/**"
+          - "apps/server/**/config/**"
+          - "apps/web/next.config.*"
+
+  - name: LongMemory
+    template_repo: RockinPaul/longmemory_railway_template
+    deploy_url: https://railway.com/deploy/longmemory
+    notes: Pinned by commit because upstream tags lag main; see guide §5.17.
+    upstreams:
+      - name: server + dashboard (built from a pinned commit)
+        repo: CaviraOSS/LongMemory
+        kind: commit
+        tag_pattern: '^v?\d+\.\d+\.\d+$'
+        pins:
+          - file: longmemory/Dockerfile
+            pattern: '^ARG\s+LM_COMMIT=(?P<version>[0-9a-f]{40})'
+          - file: dashboard/Dockerfile
+            pattern: '^ARG\s+LM_COMMIT=(?P<version>[0-9a-f]{40})'
+        relevant_paths:
+          - "src/**"
+          - "dashboard/**"
+          - "MIGRATION.md"
+          - "models.yml"
+          - "app.json"
+
+  - name: Fabric
+    template_repo: RockinPaul/fabric_railway_template
+    deploy_url: https://railway.com/deploy/fabric
+    notes: Built from source at a pinned tag with a small patch set; see guide §5.16.
+    upstreams:
+      - name: fabric (source build)
+        repo: danielmiessler/fabric
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        patched_files_glob: "patches/*.patch"
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+FABRIC_VERSION=(?P<version>v?[\d.]+)'
+          - file: Dockerfile
+            pattern: '^ARG\s+FABRIC_COMMIT=(?P<version>[0-9a-f]{40})'
+            kind: commit
+        relevant_paths:
+          - "cmd/**"
+          - "internal/server/**"
+          - "internal/cli/**"
+          - "internal/core/plugin_registry*"
+          - ".goreleaser.yaml"
+
+  - name: projectmem
+    template_repo: RockinPaul/projectmem_railway_template
+    deploy_url: https://railway.com/deploy/projectmem
+    upstreams:
+      - name: projectmem (PyPI)
+        repo: riponcm/projectmem
+        kind: tag
+        pypi: projectmem
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: 'projectmem==(?P<version>[\d.]+)'
+        relevant_paths:
+          - "src/**"
+
+  - name: gortex
+    template_repo: RockinPaul/gortex_railway_template
+    deploy_url: https://railway.com/deploy/gortex
+    upstreams:
+      - name: gortex daemon (release binary)
+        repo: zzet/gortex
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+GORTEX_VERSION=(?P<version>v?[\d.]+)'
+        relevant_paths:
+          - "cmd/**"
+          - "internal/config/**"
+          - "internal/daemon/**"
+          - ".goreleaser.yml"
+          - ".gortex.yaml"
+      - name: gortex web UI (built from a pinned commit)
+        repo: gortexhq/web
+        kind: commit
+        releases: false
+        pins:
+          - file: Dockerfile.web
+            pattern: '^ARG\s+WEB_COMMIT=(?P<version>[0-9a-f]{40})'
+        relevant_paths:
+          - "src/lib/api.ts"
+          - "src/components/dashboard/Dashboard.tsx"
+          - "next.config.ts"
+          - ".env.local.example"
+
+  - name: Observal
+    template_repo: RockinPaul/observal_railway_template
+    deploy_url: https://railway.com/deploy/observal
+    upstreams:
+      - name: api + web images
+        repo: Observal/Observal
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile.api
+            pattern: '^FROM\s+ghcr\.io/observal/observal-api:(?P<version>[^\s@]+)'
+          - file: Dockerfile.web
+            pattern: '^FROM\s+ghcr\.io/observal/observal-web:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "infra/**"
+          - "install-server.sh"
+          - "**/nginx*.conf"
+
+  - name: WeKnora
+    template_repo: RockinPaul/weknora_railway_template
+    deploy_url: https://railway.com/deploy/weknora
+    upstreams:
+      - name: app + docreader + ui images
+        repo: Tencent/WeKnora
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile.app
+            pattern: '^FROM\s+wechatopenai/weknora-app:(?P<version>[^\s@]+)'
+          - file: Dockerfile.docreader
+            pattern: '^FROM\s+wechatopenai/weknora-docreader:(?P<version>[^\s@]+)'
+          - file: Dockerfile.web
+            pattern: '^FROM\s+wechatopenai/weknora-ui:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "config/**"
+          - "frontend/nginx*"
+          - "frontend/*.conf"
+          - "frontend/Dockerfile*"
+          - "docreader/Dockerfile*"
+          - "VERSION"
+
+  - name: EverOS
+    template_repo: RockinPaul/everos_railway_template
+    deploy_url: https://railway.com/deploy/everos
+    upstreams:
+      - name: everos (PyPI)
+        repo: EverMind-AI/EverOS
+        kind: tag
+        pypi: everos
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+EVEROS_VERSION=(?P<version>[\d.]+)'
+        relevant_paths:
+          - "src/everos/api/**"
+          - "src/everos/config*"
+          - "src/everos/cli/**"
+          - "config.example.toml"
+
+  - name: Notesnook Sync Server
+    template_repo: RockinPaul/notesnook_railway_template
+    deploy_url: https://railway.com/deploy/notesnook-sync-server
+    upstreams:
+      - name: identity + sync + sse images
+        repo: streetwriters/notesnook-sync-server
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+(\.\d+)?(-beta\.\d+)?$'
+        pins:
+          - file: identity/Dockerfile
+            pattern: '^FROM\s+streetwriters/identity:(?P<version>[^\s@]+)'
+          - file: notesnook-server/Dockerfile
+            pattern: '^FROM\s+streetwriters/notesnook-sync:(?P<version>[^\s@]+)'
+          - file: sse/Dockerfile
+            pattern: '^FROM\s+streetwriters/sse:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "**/appsettings*.json"
+          - "Notesnook.API/**"
+          - "Streetwriters.Identity/**"
+          - "Streetwriters.Messenger/**"
+      - name: monograph app (streetwriters/monograph image; no git tag to pin to)
+        repo: streetwriters/notesnook
+        kind: tag
+        releases: false
+        pins: []
+        lookback_days: 90
+        relevant_paths:
+          - "apps/monograph/**"
+
+  - name: Pipecat
+    template_repo: RockinPaul/pipecat-railway-template
+    deploy_url: https://railway.com/deploy/pipecat
+    upstreams:
+      - name: pipecat-ai (PyPI)
+        repo: pipecat-ai/pipecat
+        kind: tag
+        pypi: pipecat-ai
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: pyproject.toml
+            pattern: 'pipecat-ai\[[^\]]*\]==(?P<version>[\d.]+)'
+        relevant_paths:
+          - "src/pipecat/transports/daily/**"
+          - "src/pipecat/services/openai/**"
+          - "src/pipecat/services/openrouter/**"
+          - "src/pipecat/services/google/**"
+          - "src/pipecat/services/grok/**"
+          - "src/pipecat/services/ollama/**"
+          - "src/pipecat/audio/vad/**"
+          - "src/pipecat/pipeline/**"
+
+  - name: OpenPencil
+    template_repo: RockinPaul/openpencil-railway-template
+    deploy_url: https://railway.com/deploy/openpencil
+    upstreams:
+      - name: web-host image (pinned by digest)
+        repo: ZSeven-W/openpencil
+        kind: image-digest
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^FROM\s+ghcr\.io/zseven-w/openpencil-web@(?P<version>sha256:[0-9a-f]{64})'
+            image: ghcr.io/zseven-w/openpencil-web
+        relevant_paths:
+          - "Dockerfile.web-rust*"
+          - "packaging/**"
+          - "RELEASE_NOTES/**"
+
+  - name: Persistent mise Workspace
+    template_repo: RockinPaul/mise-railway-template
+    deploy_url: https://railway.com/deploy/persistent-mise-workspace
+    upstreams:
+      - name: mise (release binary)
+        repo: jdx/mise
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d{4}\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: 'github\.com/jdx/mise/releases/download/(?P<version>v[\d.]+)/'
+        relevant_paths:
+          - "settings.toml"
+          - "docs/configuration.md"
+          - "packaging/**"
+
+  - name: Apache HertzBeat
+    template_repo: RockinPaul/hertzbeat_railway_template
+    deploy_url: https://railway.com/deploy/apache-hertzbeat
+    upstreams:
+      - name: apache/hertzbeat image
+        repo: apache/hertzbeat
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v?\d+\.\d+\.\d+$'
+        pins:
+          - file: hertzbeat/Dockerfile
+            pattern: '^FROM\s+apache/hertzbeat:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "script/**"
+          - "**/application.yml"
+          - "**/sureness.yml"
+          - "hertzbeat-manager/src/main/resources/application*.yml"
+          - "hertzbeat-warehouse/**/victoria*"
+
+  - name: Laminar
+    template_repo: RockinPaul/lmnr_railway_template
+    deploy_url: https://railway.com/deploy/laminar
+    upstreams:
+      - name: frontend + app-server images
+        repo: lmnr-ai/lmnr
+        kind: tag
+        tag_formats: ["{version}", "v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: app-server/Dockerfile
+            pattern: '^FROM\s+ghcr\.io/lmnr-ai/app-server:(?P<version>[^\s@]+)'
+          - file: frontend/Dockerfile
+            pattern: '^FROM\s+ghcr\.io/lmnr-ai/frontend:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "clickhouse-*.xml"
+          - "frontend/lib/db/**"
+          - "frontend/drizzle.config.ts"
+          - "frontend/next.config.ts"
+          - "app-server/src/main.rs"
+          - "**/quickwit*/**"
