@@ -128,6 +128,41 @@ templates:
           - "models.yml"
           - "app.json"
 
+  - name: tlbx
+    template_repo: RockinPaul/tlbx_railway_template
+    deploy_url: https://railway.com/deploy/tlbx
+    notes: Upstream releases several times a day and marks most prerelease; pin a stable tag. See guide §5.19.
+    upstreams:
+      - name: tlbx (release binary)
+        repo: tlbx-ai/tlbx
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: tlbx/Dockerfile
+            pattern: '^ARG\s+TLBX_VERSION=(?P<version>v[\d.]+)'
+        relevant_paths:
+          - "src/Ai.Tlbx.MidTerm/Startup/**"
+          - "src/Ai.Tlbx.MidTerm/Program.cs"
+          - "docs/CommunicationSecurity.md"
+          - "install.sh"
+      - name: mise
+        repo: jdx/mise
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d{4}\.\d+\.\d+$'
+        pins:
+          - file: tlbx/Dockerfile
+            pattern: '^ARG\s+MISE_VERSION=(?P<version>v[\d.]+)'
+      - name: caddy
+        repo: caddyserver/caddy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: caddy/Dockerfile
+            pattern: '^FROM\s+caddy:(?P<version>[\d.]+)-alpine'
+
   - name: OpenKnowledge
     template_repo: RockinPaul/openknowledge_railway_template
     deploy_url: https://railway.com/deploy/openknowledge
