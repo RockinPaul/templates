@@ -128,6 +128,25 @@ templates:
           - "models.yml"
           - "app.json"
 
+  - name: codeg
+    template_repo: RockinPaul/codeg_railway_template
+    deploy_url: https://railway.com/deploy/codeg
+    notes: Thin pin of the upstream multi-arch image; releases every day or two. See guide §5.20.
+    upstreams:
+      - name: codeg (published image)
+        repo: xintaofei/codeg
+        kind: tag
+        tag_formats: ["v{version}", "{version}"]
+        tag_pattern: '^v?\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+CODEG_VERSION=(?P<version>[\d.]+)'
+        relevant_paths:
+          - "Dockerfile"
+          - "docker-compose.yml"
+          - "docs/**"
+          - "src-tauri/src/web/**"
+
   - name: tlbx
     template_repo: RockinPaul/tlbx_railway_template
     deploy_url: https://railway.com/deploy/tlbx

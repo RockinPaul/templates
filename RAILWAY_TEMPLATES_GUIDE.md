@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing seventeen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge** and **tlbx**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing eighteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx** and **codeg**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -768,6 +768,42 @@ occurrence of "docker" in its README or its 3234-line installer.
 
 ---
 
+### 5.20 The easy case, and what makes it easy (codeg)
+
+codeg is a multi-agent coding workspace: a Rust server and a Next.js UI in one image, SQLite on a
+volume. It took a fraction of the effort of §5.18 or §5.19, and the reasons are worth naming,
+because they are the checklist that predicts an easy template.
+
+- **Upstream published multi-arch images with version tags**, so the template is `FROM
+  xintaofei/codeg:0.30.7` and nothing else. No source build, no release-tarball unpacking, no
+  per-arch case statement. Check Docker Hub and GHCR before assuming you must build (§3.1).
+- **It speaks plain HTTP on a configurable port**, which is exactly what Railway's edge wants, so
+  there is no gateway service at all. Compare §5.19, where an HTTPS-only upstream forced a Caddy
+  front end and a same-origin trap, and the Electron app in the same family that could not run
+  under Railway's seccomp profile at all.
+- **It is fail-closed without being fussy.** With no `CODEG_TOKEN` it generates one at first boot
+  and logs it rather than serving open; pinning `${{secret(32, "abcdef0123456789")}}` makes the
+  value stable and readable from the service's variables, giving a zero-input template whose
+  credential is still strong. That is the better half of §5.17's lesson: the deployer types nothing
+  *and* gets no weak default.
+- **`VOLUME` inherited from a base image is fine.** The catalogue's rule that Railway's managed
+  builders reject `VOLUME` applies to the instruction in *your* Dockerfile. `xintaofei/codeg`
+  declares `VOLUME /data` and a thin `FROM` of it built and deployed without complaint, with
+  Railway's own volume mounted at the same path.
+- **Not every app needs the `lost+found` dance.** codeg writes `codeg.db` straight into a
+  root-owned mount root that already contains `lost+found`, with no chown, no subdirectory and no
+  entrypoint. Test it rather than assuming the §4 workaround is always required.
+- **Find the real health endpoint before setting one.** Every unknown `/api/*` path returns a
+  plausible-looking `501 not_implemented`, which makes endpoint guessing useless, and `/api/health`
+  answers **405 to GET**. It is `POST /api/health` → `{"status":"ok","version":"0.30.7"}`. The
+  health check used here is `/`, which serves the static shell unauthenticated and returns 200.
+- **Say plainly what does not survive a redeploy.** Agent CLIs installed at runtime live in the
+  container layer, and codeg's in-place *Software Update* rewrites binaries there too — upstream's
+  own compose file carries that warning. Both are in the listing, with "bump the pinned tag" as the
+  durable path.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -878,6 +914,8 @@ Variables / templates
 - Daily volume backups: `volumeInstanceBackupScheduleUpdate(volumeInstanceId, kinds:[DAILY])`. The enum is **`VolumeInstanceBackupScheduleKind`** (DAILY/WEEKLY/MONTHLY), it takes the **volumeInstanceId** not the volumeId, `VolumeInstanceUpdateInput` carries no backup field, and nothing on `VolumeInstance` reads the schedule back.
 - `builder: "DOCKERFILE"` is **not** a valid `ServiceInstanceUpdateInput` value and returns "Problem processing request". Omit it; railway.json declares the builder and Railway detects the Dockerfile. Isolate one field at a time when a whole input is rejected.
 - A reference volume provisions at the **plan default** (50 GB observed on Pro). Always set the template's size with `templateVolumeUpdate`.
+- **`VOLUME` is only rejected in your own Dockerfile.** A base image that declares `VOLUME /data` builds and deploys fine through a thin `FROM`, with Railway's volume mounted at the same path.
+- **`railway.json` / `railway.toml` config-as-code is deprecated.** The CLI now prints a migration notice pointing at Infrastructure-as-Code (`.railway/railway.ts`, `railway config migrate`). Every template in this repository still ships railway.json; plan the migration rather than discovering it when support ends.
 - `${{secret(N, "alphabet")}}` takes a second argument. Needed when a consumer validates byte length against a fixed set, e.g. oauth2-proxy's 16/24/32-byte cookie secret: `${{secret(32, "abcdef0123456789")}}`.
 - "You have been blocked from publishing templates" is **workspace-wide**, triggered by one template Railway has hidden administratively, and blocks readme edits to every other template. Nothing in the API says which template or that it is hidden. Only Railway lifts it; ask on Central Station.
 - Publish through `railway templates publish|update`. A hand-rolled `templatePublish` against the public GraphQL endpoint kept reporting that block after it had been lifted; expiry, User-Agent and template identity were all ruled out.
@@ -924,6 +962,7 @@ Docs
 | LongMemory | `longmemory` | longmemory (Node server, `/v1/*` + `/mcp`, SQLite on a `/data` volume) and dashboard (Next.js) — 2 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` prompted for nothing.** Pinned by commit SHA because the newest tag is 155 commits behind a `main` that reports a lower version, and the GHCR image is not public; `LONGMEMORY_HOST=::` gave Node a dual-stack socket with no socat needed; the dashboard entrypoint exports `HOSTNAME=::` because Railway injects it at run time; the server ships an EMPTY api key so the entrypoint refuses to boot without one; db in a `/data/db` subdirectory with a root chown then `gosu` drop; literal defaults (`PORT=8080`, `""`) were nulled into required fields by generation so constants were baked into the images instead; without an embedding key recall is lexical and `strict` mode can hide the matching memory (§5.17) |
 | OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.71.13` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.13.0 and caddy 2.10 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields, all Google OAuth.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
 | tlbx | `tlbx` | tlbx (`mt` release binary v10.16.2 + mise on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy, app preview cannot work (`PORT+1` origin), and there is no Docker — all three stated in the listing (§5.19) |
+| codeg | `codeg` | codeg (`xintaofei/codeg:0.30.7`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
