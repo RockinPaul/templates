@@ -723,6 +723,13 @@ template therefore follows upstream's own documented recipe — three services, 
 
 ## 6. Documentation set
 
+**Check every documented default against the generated template config, not against your intent.**
+OpenKnowledge's overview and README both stated that `OAUTH2_PROXY_EMAIL_DOMAINS` defaults to `*`.
+Nothing set it: the image did not, and generation had turned the reference project's placeholder
+into a required composer field with no value. A placeholder you typed into the reference project
+reads like a default while you are building and is a blank box to the deployer. The variables
+table in the docs should be generated from, or diffed against, `serializedConfig`.
+
 **README.md** (repo): deploy button `https://railway.com/deploy/<code>?referralCode=…`, services table (service → runs → source), first login exactly as it works, variables table per service with defaults and purpose, "How it fits together" (one bullet per non-obvious mechanism: bind, proxy, patches, volumes, client IPs, sizing, expected startup noise), "Not supported/included", "Upgrading", files list. Make sure every command in it exists upstream (`observal doctor patch --all-harnesses`, not upstream's own README's `--patch`).
 
 **TEMPLATE_OVERVIEW.md** (marketplace page), Railway's expected structure:
