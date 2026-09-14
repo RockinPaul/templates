@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing fifteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat** and **Laminar**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing sixteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar** and **OpenKnowledge**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -661,6 +661,62 @@ lightest shape here that still ships a UI, and it published with **zero composer
   a recall issued as one `user_id` returned memories ingested under two others, all in one store
   with `worlds: 1`. That belongs in the listing's security notes, not discovered by a deployer.
 
+### 5.18 Two authentication paths behind one gateway, for browsers and for agents (OpenKnowledge)
+
+OpenKnowledge is an AI-native Markdown knowledge base: a collaborative browser editor over a real
+git repository, plus an MCP endpoint that agents connect to directly. The server ships **no login of
+its own**, so putting a public domain on it hands anyone who finds the URL full read and write. The
+template therefore follows upstream's own documented recipe — three services, one of them public.
+
+- **Caddy is the only public service, and it splits by path.** `/mcp*` is gated on a
+  `Bearer {env.MCP_TOKEN}` header and proxied straight to the app; everything else goes through
+  oauth2-proxy → Google → the app. Two paths because the two clients cannot share one: an agent
+  cannot complete an interactive Google login, and a browser cannot reliably attach a static bearer
+  to a WebSocket handshake. The editor's `/collab` socket is cookie-gated, which is precisely why
+  upstream reaches for a cookie-issuing proxy rather than Basic auth. A two-service Basic-auth
+  simplification looks obviously cheaper and quietly breaks collaborative editing — the UI survives,
+  the socket does not.
+- **A silent start/stop cycle with clean logs is a port mismatch, not a crash.** oauth2-proxy
+  listens on `[::]:4180` by default, which upstream's recipe keeps. On Railway that deployed, logged
+  a normal startup, then "Starting Container / Stopping Container" with **no error line anywhere**,
+  because the healthcheck was probing the port the platform expected. Standardising every service on
+  `:8080` fixed it. Read that failure shape as "nothing is listening where the probe looks".
+- **An app-level Host allowlist makes a service unprobeable from the edge.** `OK_EXTERNAL_URL`
+  doubles as an allowed-Host check, so a direct request to the app's own domain returns
+  `403 urn:ok:error:host-not-allowed`. Spoofing `Host:` does not help — Railway's edge routes by
+  Host, so the request simply arrives at the gateway instead. Reach the service from inside:
+  `railway ssh -s <svc> -- node -e "fetch('http://localhost:8080/', {headers:{Host:'<gateway>'}})"`.
+- **`${{secret(N)}}` takes an alphabet argument, and sometimes you need it.** oauth2-proxy requires
+  a cookie secret of exactly 16, 24 or 32 **bytes** and refuses to boot otherwise, so the default
+  alphabet is wrong here: `${{secret(32, "abcdef0123456789")}}`.
+- **MCP over streamable HTTP is session-based, and a naive probe misreports it.** `tools/list` sent
+  straight after `initialize` answers `-32000 Server not initialized`; parsing that with
+  `result.get("tools", [])` yields **"0 tools"** and reads as a broken deployment. The real sequence
+  is `initialize` → read the `Mcp-Session-Id` **response header** → `notifications/initialized` →
+  then calls, every one carrying that header. Caddy passes it through untouched. Verify a tool
+  actually runs, not just that the endpoint answers: a `write` followed by a `search` proves the
+  store initialised on the fresh volume, which a successful `initialize` does not.
+- **Bake a consent interlock rather than exposing it.** Upstream gates external binding behind an
+  `OK_ALLOW_EXTERNAL` opt-in. Left as a service variable it would be nulled by generation into a
+  required field asking the deployer to type `1` — so it is set in the image, the same manoeuvre as
+  §5.17's constants, and the entrypoint still validates it.
+- **Small things that stop a build or a boot**: a `VOLUME` instruction is rejected by Railway's
+  managed builders; `git` is a hard boot requirement (the server runs a git preflight and the
+  history subsystems shell out to the binary), which `node:24-slim` does not carry; and a first-boot
+  `init` must be fed `< /dev/null` or it prompts and hangs the deploy.
+- **Watch patterns belong in `railway.json`, not in the template.** A documentation-only commit
+  rebuilt all three services and restarted the collaboration server, which drops live editing
+  sessions. Patching `deploy.watchPatterns` into the published template through a change-set
+  **applied cleanly and read back null** — the template config does not carry the field. Setting
+  `build.watchPatterns` in each service's `railway.json` does work and is what deployers get.
+  Measured: patterns are **relative to the repository root**, so a service whose `rootDirectory`
+  is `/ok` needs `["ok/**"]`, not `["**"]`; a later docs-only push then reported **SKIPPED** on
+  all three services instead of rebuilding them. Worth testing with a throwaway docs commit,
+  because guessing the wrong base would leave a service that never redeploys at all.
+- **Verify the one-click copy generates its own secrets.** Calling `/mcp` on the fresh deployment
+  with the *reference project's* token returned 401 and with its own returned 200 — a two-request
+  check that proves `${{secret(48)}}` regenerates per deployment rather than shipping a shared one.
+
 ---
 
 ---
@@ -760,6 +816,10 @@ Variables / templates
 - `--image` rejects `avatars.githubusercontent.com` with "Invalid image URL", with or without `?v=4`; `raw.githubusercontent.com` is accepted.
 - Build GraphQL bodies in Python, never by shell interpolation. A `"$SVC:PORT"` loop corrupted a serviceId into a filesystem path and the API answered **"Not Authorized"**, which reads as a permissions failure and is not; the same mutation with a Python-built body succeeded.
 - Template **name** editing lives only on `backboard.railway.com/graphql/internal` (`templateChangeSetStage`/`Apply`); `/graphql/v2` does not know `TemplatePatch`.
+- That internal endpoint **403s a bare scripting user-agent**. `templateChangeSetStage` needs `Origin: https://railway.com`, a `Referer` and a browser `User-Agent`, or it returns HTTP 403 — which reads as an auth failure and is not.
+- `templateVolumeUpdate(templateId, serviceId, volumeId, sizeMB)` returns `Template!`, so it needs a selection set, the same trap as `templatePublish`. The template's volume id lives in the template's own id namespace, not the project's.
+- **Read `serializedConfig` at the right depth.** Healthcheck is `services[id].deploy.healthcheckPath` and the public domain is `services[id].networking.serviceDomains`; a flat read of `services[id].healthcheckPath` returns null for a perfectly good template and looks like generation dropped them.
+- `${{secret(N, "alphabet")}}` takes a second argument. Needed when a consumer validates byte length against a fixed set, e.g. oauth2-proxy's 16/24/32-byte cookie secret: `${{secret(32, "abcdef0123456789")}}`.
 - "You have been blocked from publishing templates" is **workspace-wide**, triggered by one template Railway has hidden administratively, and blocks readme edits to every other template. Nothing in the API says which template or that it is hidden. Only Railway lifts it; ask on Central Station.
 - Publish through `railway templates publish|update`. A hand-rolled `templatePublish` against the public GraphQL endpoint kept reporting that block after it had been lifted; expiry, User-Agent and template identity were all ruled out.
 - **Check your own notes before deciding a problem is new.** Three earlier templates had been published with the CLI and the exact command was recorded; reaching for schema introspection and a raw mutation instead is what produced the false signal above.
@@ -768,6 +828,7 @@ Repos / CLI
 - `railway add -r` "You do not have access" → `serviceConnect`; new repos may be "Not Authorized" for ~40 min.
 - `railway variables/logs/ssh` need the linked directory.
 - Without watch filters, every push can rebuild connected services. Copy explicit per-service watch patterns into the published template to avoid restarting user sessions for README edits.
+- Watch patterns cannot be carried by the template: a `deploy.watchPatterns` change-set applies and reads back null. Put `build.watchPatterns` in each service's `railway.json` instead, **relative to the repository root** (`["ok/**"]` for a service rooted at `/ok`), and prove it with a docs-only push — the deployments should report `SKIPPED`.
 - Keep project names short and abort after any failed `railway init`; confirm the exact intended linked project ID before template provisioning so a parent directory's link cannot receive the deployment.
 - Sub-agent reports can get lost; have them write files.
 - **Before `git add` in a new folder, `git rev-parse --show-toplevel` must print that folder.** A parent directory that is itself a git repo swallows the add: `git init` guarded by `--is-inside-work-tree` did not run, and `git add -A` pushed 455 workspace files (agent config, memory notes, other projects) to a brand-new public repo. `git init` unconditionally in the new directory; prefer explicit paths over `-A` in directories you did not create this session.
@@ -802,6 +863,7 @@ Docs
 | Fabric | `fabric` | one Go service built from pinned upstream source (no upstream image), volume at `/home/appuser/.config/fabric` | **Built from source without forking.** A 190 MB fork pinned 27 releases behind became a 228 KB repo whose Dockerfile clones a pinned tag, asserts that tag's commit so a moved tag fails the build, and applies an 84-line patch — `/health` plus its auth exemption, `text/readystream` → `text/event-stream` (upstream's own swagger already said so), and CORS moved off hardcoded `localhost:5173` to `FABRIC_ALLOWED_ORIGIN`; the bump to v1.4.478 brought two upstream security fixes and forced Go 1.26; Fabric reads providers from `~/.config/fabric/.env` not the process env, so keys land in plaintext on the volume; `railway.json` supplies the healthcheck the reference project lacked, and that reference project later vanished (§5.16) |
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 | LongMemory | `longmemory` | longmemory (Node server, `/v1/*` + `/mcp`, SQLite on a `/data` volume) and dashboard (Next.js) — 2 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` prompted for nothing.** Pinned by commit SHA because the newest tag is 155 commits behind a `main` that reports a lower version, and the GHCR image is not public; `LONGMEMORY_HOST=::` gave Node a dual-stack socket with no socat needed; the dashboard entrypoint exports `HOSTNAME=::` because Railway injects it at run time; the server ships an EMPTY api key so the entrypoint refuses to boot without one; db in a `/data/db` subdirectory with a root chown then `gosu` drop; literal defaults (`PORT=8080`, `""`) were nulled into required fields by generation so constants were baked into the images instead; without an embedding key recall is lexical and `strict` mode can hide the matching memory (§5.17) |
+| OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.71.13` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.13.0 and caddy 2.10 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields, all Google OAuth.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

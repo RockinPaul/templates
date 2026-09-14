@@ -128,6 +128,46 @@ templates:
           - "models.yml"
           - "app.json"
 
+  - name: OpenKnowledge
+    template_repo: RockinPaul/openknowledge_railway_template
+    deploy_url: https://railway.com/deploy/openknowledge
+    notes: Three services behind one Caddy gateway; npm package pinned by version, proxies by image tag. See guide §5.18.
+    upstreams:
+      - name: open-knowledge (npm package, installed at a pinned version)
+        repo: inkeep/open-knowledge
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: ok/Dockerfile
+            pattern: '^ARG\s+OK_VERSION=(?P<version>[\d.]+)'
+        relevant_paths:
+          - "packages/server/**"
+          - "packages/app/**"
+          - "docs/remote-control/**"
+          - "docs/**/docker*"
+      - name: oauth2-proxy
+        repo: oauth2-proxy/oauth2-proxy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: oauth2-proxy/Dockerfile
+            pattern: '^FROM\s+quay\.io/oauth2-proxy/oauth2-proxy:(?P<version>[^\s@]+)'
+        relevant_paths:
+          - "docs/docs/configuration/**"
+      - name: caddy
+        repo: caddyserver/caddy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: caddy/Dockerfile
+            pattern: '^FROM\s+caddy:(?P<version>[\d.]+)-alpine'
+        relevant_paths:
+          - "caddyconfig/**"
+          - "modules/caddyhttp/**"
+
   - name: Fabric
     template_repo: RockinPaul/fabric_railway_template
     deploy_url: https://railway.com/deploy/fabric

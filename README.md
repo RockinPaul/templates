@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building fifteen templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building sixteen templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge).
 
 Template repositories built with it:
 
@@ -23,6 +23,7 @@ Template repositories built with it:
 | Persistent mise Workspace | https://railway.com/deploy/persistent-mise-workspace | [mise-railway-template](https://github.com/RockinPaul/mise-railway-template) |
 | Apache HertzBeat | https://railway.com/deploy/apache-hertzbeat | [hertzbeat_railway_template](https://github.com/RockinPaul/hertzbeat_railway_template) |
 | Laminar | https://railway.com/deploy/laminar | [lmnr_railway_template](https://github.com/RockinPaul/lmnr_railway_template) |
+| OpenKnowledge | https://railway.com/deploy/openknowledge | [openknowledge_railway_template](https://github.com/RockinPaul/openknowledge_railway_template) |
 
 ## Weekly upstream update assessment
 
