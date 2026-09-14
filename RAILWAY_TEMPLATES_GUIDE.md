@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing sixteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar** and **OpenKnowledge**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing seventeen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge** and **tlbx**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -719,6 +719,55 @@ template therefore follows upstream's own documented recipe — three services, 
 
 ---
 
+### 5.19 An HTTPS-only upstream, and a same-origin check that a proxy quietly breaks (tlbx)
+
+tlbx is a browser terminal multiplexer: persistent shells and coding-agent sessions, reached from a
+phone or a laptop. It is the first template here whose value is a *workstation* rather than an app,
+and the first whose upstream ships no container story at all — no Dockerfile, no compose, not one
+occurrence of "docker" in its README or its 3234-line installer.
+
+- **An app with no HTTP mode forces a gateway.** `app.Urls.Add($"https://{bind}:{port}")` is
+  hardcoded. Railway's edge speaks plain HTTP to a container, so Caddy fronts it and dials
+  `https://svc.railway.internal:8080` with `tls_insecure_skip_verify` — the certificate is
+  self-signed and the hop never leaves the private network. The platform health check must be
+  answered by Caddy itself (`/up`), because the probe is plain HTTP and would meet a TLS handshake.
+  For the same reason the app service gets **no** `healthcheckPath` at all.
+- **A reverse proxy can break a same-origin check without touching a header you wrote.** tlbx
+  compares the browser's `Origin` against `request.Host` on scheme, host **and** port. Caddy's
+  `transport http { tls }` rewrites `Host` to the upstream address, so every WebSocket the interface
+  opens returned 403 while the page itself loaded perfectly — the editor appears and never connects.
+  The fix is one line, `header_up Host {http.request.hostport}`; `{host}` is not enough because it
+  drops the port. Caddy preserves `Host` by default over a *plain* upstream — verified with a
+  header-echo container — so this is specific to the TLS transport, and it is invisible until you
+  test a real WebSocket.
+- **Read the status codes as a ladder.** What made that diagnosable was noticing three distinct
+  answers: **401 unauthenticated, 403 origin refused, 400 origin accepted but handshake incomplete**.
+  Chasing "403" alone produced two wrong theories (a stripped port, then a scheme mismatch). The
+  moment 403 turned into 400, the cause was proven without reading another line of source.
+- **Verify a WebSocket with a real client, not curl.** curl can reach 101 on a bare upgrade but
+  cannot complete these handshakes, so it reports 400 where a browser succeeds. A ~25-line Node
+  script using `https.request` and its `upgrade` event gives a true 101 plus the first server frame.
+- **A workstation needs its writable paths on the volume, or it is a toy.** Anything `apt-get`
+  installs at runtime is gone on the next redeploy; only the volume survives. So `HOME`,
+  the npm global prefix and mise's data directory all live there, which is what makes
+  `npm i -g` and `mise use -g python@3.13` persist. mise earns its place precisely because the image
+  would otherwise be one-language-forever: it installs precompiled toolchains onto the volume with
+  no compiler present (verified — Python 3.13 with working pip, no gcc in the image).
+- **`/etc/profile` rebuilds `PATH` and discards the image `ENV`.** A login shell therefore lost the
+  shims that every other shell had. The app spawns plain bash so its terminals were unaffected,
+  which is exactly the kind of gap that ships unnoticed; a `/etc/profile.d` snippet closes it.
+- **Some upstream features cannot survive the platform, and the listing must say so.** App preview
+  serves from `PORT + 1` and hands the browser `scheme://<your host>:8081`, which Railway's edge
+  never answers, with no setting to override the origin. Containers are not privileged, so nothing
+  inside can run Docker. Both were verified rather than assumed — the container really does listen
+  on 8081 — and both are written into the overview.
+- **Generate the password instead of asking for it.** `${{secret(48)}}` made this a zero-input
+  template *and* removed its worst failure mode: a required password field on a service that is a
+  shell invites someone to type something short. The one-click copy proved it, refusing the
+  reference project's password and accepting its own.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -826,6 +875,9 @@ Variables / templates
 - That internal endpoint **403s a bare scripting user-agent**. `templateChangeSetStage` needs `Origin: https://railway.com`, a `Referer` and a browser `User-Agent`, or it returns HTTP 403 — which reads as an auth failure and is not.
 - `templateVolumeUpdate(templateId, serviceId, volumeId, sizeMB)` returns `Template!`, so it needs a selection set, the same trap as `templatePublish`. The template's volume id lives in the template's own id namespace, not the project's.
 - **Read `serializedConfig` at the right depth.** Healthcheck is `services[id].deploy.healthcheckPath` and the public domain is `services[id].networking.serviceDomains`; a flat read of `services[id].healthcheckPath` returns null for a perfectly good template and looks like generation dropped them.
+- Daily volume backups: `volumeInstanceBackupScheduleUpdate(volumeInstanceId, kinds:[DAILY])`. The enum is **`VolumeInstanceBackupScheduleKind`** (DAILY/WEEKLY/MONTHLY), it takes the **volumeInstanceId** not the volumeId, `VolumeInstanceUpdateInput` carries no backup field, and nothing on `VolumeInstance` reads the schedule back.
+- `builder: "DOCKERFILE"` is **not** a valid `ServiceInstanceUpdateInput` value and returns "Problem processing request". Omit it; railway.json declares the builder and Railway detects the Dockerfile. Isolate one field at a time when a whole input is rejected.
+- A reference volume provisions at the **plan default** (50 GB observed on Pro). Always set the template's size with `templateVolumeUpdate`.
 - `${{secret(N, "alphabet")}}` takes a second argument. Needed when a consumer validates byte length against a fixed set, e.g. oauth2-proxy's 16/24/32-byte cookie secret: `${{secret(32, "abcdef0123456789")}}`.
 - "You have been blocked from publishing templates" is **workspace-wide**, triggered by one template Railway has hidden administratively, and blocks readme edits to every other template. Nothing in the API says which template or that it is hidden. Only Railway lifts it; ask on Central Station.
 - Publish through `railway templates publish|update`. A hand-rolled `templatePublish` against the public GraphQL endpoint kept reporting that block after it had been lifted; expiry, User-Agent and template identity were all ruled out.
@@ -835,7 +887,7 @@ Repos / CLI
 - `railway add -r` "You do not have access" → `serviceConnect`; new repos may be "Not Authorized" for ~40 min.
 - `railway variables/logs/ssh` need the linked directory.
 - Without watch filters, every push can rebuild connected services. Copy explicit per-service watch patterns into the published template to avoid restarting user sessions for README edits.
-- Watch patterns cannot be carried by the template: a `deploy.watchPatterns` change-set applies and reads back null. Put `build.watchPatterns` in each service's `railway.json` instead, **relative to the repository root** (`["ok/**"]` for a service rooted at `/ok`), and prove it with a docs-only push — the deployments should report `SKIPPED`.
+- Watch patterns cannot be carried by the template: a `deploy.watchPatterns` change-set applies and reads back null, but `deploy.healthcheckPath` through the same change-set **does** stick — so a silent no-op is per-field, not a rule about change-sets. Read back after every patch. Put `build.watchPatterns` in each service's `railway.json` instead, **relative to the repository root** (`["ok/**"]` for a service rooted at `/ok`), and prove it with a docs-only push — the deployments should report `SKIPPED`.
 - Keep project names short and abort after any failed `railway init`; confirm the exact intended linked project ID before template provisioning so a parent directory's link cannot receive the deployment.
 - Sub-agent reports can get lost; have them write files.
 - **Before `git add` in a new folder, `git rev-parse --show-toplevel` must print that folder.** A parent directory that is itself a git repo swallows the add: `git init` guarded by `--is-inside-work-tree` did not run, and `git add -A` pushed 455 workspace files (agent config, memory notes, other projects) to a brand-new public repo. `git init` unconditionally in the new directory; prefer explicit paths over `-A` in directories you did not create this session.
@@ -871,6 +923,7 @@ Docs
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.9.3, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 | LongMemory | `longmemory` | longmemory (Node server, `/v1/*` + `/mcp`, SQLite on a `/data` volume) and dashboard (Next.js) — 2 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` prompted for nothing.** Pinned by commit SHA because the newest tag is 155 commits behind a `main` that reports a lower version, and the GHCR image is not public; `LONGMEMORY_HOST=::` gave Node a dual-stack socket with no socat needed; the dashboard entrypoint exports `HOSTNAME=::` because Railway injects it at run time; the server ships an EMPTY api key so the entrypoint refuses to boot without one; db in a `/data/db` subdirectory with a root chown then `gosu` drop; literal defaults (`PORT=8080`, `""`) were nulled into required fields by generation so constants were baked into the images instead; without an embedding key recall is lexical and `strict` mode can hide the matching memory (§5.17) |
 | OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.71.13` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.13.0 and caddy 2.10 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields, all Google OAuth.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
+| tlbx | `tlbx` | tlbx (`mt` release binary v10.16.2 + mise on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy, app preview cannot work (`PORT+1` origin), and there is no Docker — all three stated in the listing (§5.19) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
