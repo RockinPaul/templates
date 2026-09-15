@@ -147,6 +147,27 @@ templates:
           - "docs/**"
           - "src-tauri/src/web/**"
 
+  - name: Orca
+    template_repo: RockinPaul/orca_railway_template
+    deploy_url: https://railway.com/deploy/orca
+    notes: Upstream releases every day or two; a version bump must move the per-arch .deb digests too. See guide §5.21.
+    upstreams:
+      - name: orca-ide (.deb release artifact)
+        repo: stablyai/orca
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+ORCA_VERSION=(?P<version>[\d.]+)'
+        relevant_paths:
+          - "docs/reference/headless-linux-server.md"
+          - "docs/reference/remote-wire-compatibility.md"
+          - "docs/site/content/docs/remote-servers.mdx"
+          - "docs/site/content/docs/ways-to-run.mdx"
+          - "src/cli/runtime/runtime-remote-pairing.ts"
+          - "config/docker/headless-pairing/**"
+
   - name: tlbx
     template_repo: RockinPaul/tlbx_railway_template
     deploy_url: https://railway.com/deploy/tlbx

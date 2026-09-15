@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building eighteen templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building nineteen templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca).
 
 Template repositories built with it:
 
@@ -26,6 +26,7 @@ Template repositories built with it:
 | OpenKnowledge | https://railway.com/deploy/openknowledge | [openknowledge_railway_template](https://github.com/RockinPaul/openknowledge_railway_template) |
 | tlbx | https://railway.com/deploy/tlbx | [tlbx_railway_template](https://github.com/RockinPaul/tlbx_railway_template) |
 | codeg | https://railway.com/deploy/codeg | [codeg_railway_template](https://github.com/RockinPaul/codeg_railway_template) |
+| Orca | https://railway.com/deploy/orca | [orca_railway_template](https://github.com/RockinPaul/orca_railway_template) |
 
 ## Weekly upstream update assessment
 

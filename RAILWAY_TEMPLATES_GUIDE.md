@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing eighteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx** and **codeg**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing nineteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg** and **Orca**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -804,6 +804,67 @@ because they are the checklist that predicts an easy template.
 
 ---
 
+### 5.21 A desktop application run headless, and a volume that mounted but went unused (Orca)
+
+Orca is an Electron agent development environment. Upstream ships desktop packages and a documented
+`orca serve` mode, no server image, and scopes Remote Orca Servers to a private network. The
+template installs the published `.deb` against a per-arch digest and runs that serve mode. Two
+lessons here cost more than the rest of the build combined.
+
+- **`gosu` and `su` reset `HOME` from `/etc/passwd`, which silently voids a volume.** `ENV
+  HOME=/data/home` followed by `exec gosu orca ...` does not give the process that home: the target
+  user's passwd entry wins, so it became `/home/orca`, inside the image layer. The volume mounted
+  and stayed empty, and **every redeploy minted a fresh device token, server keypair and paired
+  device id**, so the pairing URL people had saved stopped working. Fix: `useradd -u 1000
+  -d /data/home -M`, so passwd itself points at the volume, and seed `/etc/skel` from the entrypoint
+  on first boot, because `-M` skips it and `/data` does not exist at build time. Generalises to any
+  entrypoint that drops privileges: **the volume-backed home must be set in passwd, not only in the
+  environment.** The catalogue's older advice to export `HOME` is not enough (§7).
+- **A local `docker restart` hides this completely.** Restarting keeps the container filesystem, so
+  the state written into the image layer is still there and everything looks persistent. Only a
+  fresh container — a real redeploy — exposes it. **Verify persistence by replacing the container,
+  never by restarting it.**
+
+Running Electron headless on Railway needs four things, and three of them fail in ways that do not
+name the cause:
+
+- **xvfb**: "headless" means no window, not no display. It is one of the package's own declared
+  dependencies, so apt pulls it, but `xvfb-run` additionally needs **xauth**, which is only a
+  *recommends* — with `--no-install-recommends` every launch dies with `xvfb-run: error: xauth
+  command not found`.
+- **libasound2 is required but not declared**: `error while loading shared libraries: libasound.so.2`.
+- **`ELECTRON_DISABLE_SANDBOX=1` plus a non-root user.** Electron refuses to run as root without
+  `--no-sandbox`, and Orca's CLI rejects unknown flags so that switch cannot be passed through. As
+  non-root, Chromium's namespace sandbox needs `CLONE_NEWUSER`, which Railway's seccomp profile
+  denies — proven by contrast, since the identical run succeeds under
+  `docker run --security-opt seccomp=unconfined`.
+- **The advertised address must be a `wss://` URL.** Orca passes `--pairing-address` through
+  verbatim, so a bare hostname produces `ws://host:8080`, which Railway's 443-only edge can never
+  serve. `wss://$RAILWAY_PUBLIC_DOMAIN` drops the port and uses TLS.
+
+**Read upstream's own CI and reference docs before writing the Dockerfile.** Orca's repository
+carries `config/docker/headless-pairing/Dockerfile` — a test harness, not a shippable image — and it
+installs exactly `xvfb`, `xauth` and `libasound2t64`. `docs/reference/headless-linux-server.md`
+lists the full Electron library set and notes that current builds start Xvfb themselves when
+`DISPLAY` is unset. Both would have saved two failed boots. "Upstream ships no container image" is
+not the same as "upstream has no Dockerfile"; grep for one before claiming either in a listing.
+
+**A WebSocket 101 proves nothing about authorization.** The upgrade succeeds for anyone, which looks
+alarming and is not: the transport is anonymous by necessity and the credential is presented inside
+the encrypted channel (`e2ee_hello` → `e2ee_ready` → encrypted `e2ee_auth`, TweetNaCl box, framed as
+`base64(nonce(24) || box.after(json, nonce, box.before(serverPub, mySecret)))`). Measured against
+the live deployment with a hand-written client: a real device token answers `e2ee_authenticated`, a
+tampered one `e2ee_error{code:"unauthorized"}`, and plaintext auth is closed with `4001`. **Speak
+the protocol before concluding a server is open — or that it is closed.**
+
+**Publish the reservation, do not bury it.** Upstream marks Remote Orca Servers beta and tells you
+to keep server and client on a private path such as a tailnet or LAN; a Railway domain is public.
+The token holds, and that is measured rather than assumed, but the listing says plainly that this
+runs the feature further out than upstream intends, that the pairing URL is the whole credential and
+is only readable from the deploy log, and that sessions end on redeploy.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -855,7 +916,9 @@ Networking / binding
 Volumes / processes
 - `lost+found` at the mount root: `PGDATA` subdirectory; Redis 8.2 skips permission fixes (rmdir it); apps as non-root can't write (chown as root, then drop).
 - Stale pid file with pid 1 on a volume blocks the next start.
-- `setpriv`/`gosu` keep `HOME=/root`; export `HOME` for the target user.
+- `setpriv`/`gosu`/`su` set `HOME` from the **target user's `/etc/passwd` entry**, overriding an
+  inherited `ENV HOME`. Exporting `HOME` is not enough: give the user that home with
+  `useradd -d <path>`, or the process writes to the image layer while the volume sits empty (§5.21).
 - Images often lack `curl`, `ps`, `timeout`; `bash` `/dev/tcp` and `/proc` are your tools. `kill` is a shell builtin, not a binary, in slim images: `docker exec c sh -c 'kill …'`.
 - An app `exec`ed as PID 1 does not reap children: a dead sidecar is a zombie and `kill -0` still succeeds. Watch `/proc/$PID/status` for `State: Z` and `kill -TERM 1` so Railway restarts the container.
 - Upstreams that raise on a missing key at startup (`LLMNotConfiguredError`) crash-loop silently on Railway; check the variable in the entrypoint and exit with a message.
@@ -967,6 +1030,7 @@ Docs
 | OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.71.13` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.13.0 and caddy 2.10 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields, all Google OAuth.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
 | tlbx | `tlbx` | tlbx (`mt` release binary v10.16.2 + mise on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy, app preview cannot work (`PORT+1` origin), and there is no Docker — all three stated in the listing (§5.19) |
 | codeg | `codeg` | codeg (`xintaofei/codeg:0.30.7`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
+| Orca | `orca` | orca (`orca-ide` 1.4.203 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
