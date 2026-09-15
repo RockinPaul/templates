@@ -935,6 +935,11 @@ from the §5.17 template so the agent has memory across sessions. Zero required 
   harness resolves the key through its credentials store first and the environment second, and
   persists a UI-entered key on the volume. The entrypoint warns when it is empty rather than
   refusing to boot.
+- **A one-click deploy orders services by variable references.** In the fresh copy both services
+  were created in the same second, but `dsh` sat `QUEUED` while `longmemory` was `DEPLOYING` and
+  went live 11 s after it — `dsh` references `${{longmemory.*}}`. So the memory server is already up
+  when the client first dials on a one-click deploy; the raised reconnect budget covers redeploys
+  and the reference project, where the ordering is not guaranteed.
 - Platform notes: `variableUpsert` on a service triggers a redeploy (the rotated LongMemory key
   superseded an in-flight build); `serviceInstanceUpdate` of `rootDirectory` does too; and
   `caddy hash-password` needs a newline-terminated line on stdin or fails with `EOF`.
