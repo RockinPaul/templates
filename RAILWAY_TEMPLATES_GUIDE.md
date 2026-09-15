@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca** and **DSH + LongMemory**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-one of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory** and **Mirage Daemon**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -946,6 +946,70 @@ from the §5.17 template so the agent has memory across sessions. Zero required 
 
 ---
 
+### 5.23 A daemon that exits when idle, binds one address family, and fences Host before health (Mirage)
+
+Mirage is a virtual terminal for AI agents: a FastAPI daemon that owns "workspaces" — a virtual
+filesystem over mounted resources (S3/R2/GCS, Postgres/Mongo/Redis, Notion/Slack/Gmail…) with an
+in-process bash-like shell and git-style versioning — and exposes them over `/v1/*`. Upstream
+publishes it as a PyPI package (`mirage-ai`), documents a shared-daemon `token` auth mode, and
+leaves `/v1/health` open for probes. That passes the screening heuristic's third clause; it is
+also the first candidate in this guide that is a *backend agents call* rather than a workstation.
+One service, zero required fields. Four findings, each of which would have shipped a broken
+template if assumed rather than measured.
+
+- **Railway's health probe sends `Host: healthcheck.railway.app`.** The daemon validates `Host`
+  *before* authentication, health check included, and an explicit `MIRAGE_ALLOWED_HOSTS` list
+  *replaces* the loopback defaults. The first deployment built, started cleanly, and FAILED at the
+  deploy stage with a log full of `rejecting request from 127.0.0.1: Host='healthcheck.railway.app'
+  not in allowlist […]` and `GET /v1/health 400`. The entrypoint now trusts loopback,
+  `healthcheck.railway.app`, `RAILWAY_PUBLIC_DOMAIN`, `RAILWAY_PRIVATE_DOMAIN` and
+  `MIRAGE_EXTRA_HOSTS`. **Any app with a Host allowlist needs that probe hostname on it** — this is
+  the platform fact behind every "healthy logs, failed health check" on such apps (§7).
+- **uvicorn cannot bind dual-stack.** `--host ::` gave a listener that answered `[::1]` and
+  refused `127.0.0.1` inside the same container: asyncio sets `IPV6_V6ONLY` on every AF_INET6
+  socket it creates. `--host 0.0.0.0` is the mirror image and is invisible on Railway's IPv6-only
+  private network (§5.17). Fix, measured three ways: uvicorn on `127.0.0.1:7000`, `socat
+  TCP6-LISTEN:8080,ipv6only=0,fork,reuseaddr TCP4:127.0.0.1:7000` in front — v4 200, v6 200, and
+  because socat relays TCP the `Host` header reaches the daemon untouched, so the allowlist still
+  answered 400 to a foreign host through the relay. Laminar's pattern (§5.15), now with the reason
+  it is needed for Python servers specifically.
+- **The daemon exits when idle, and that cannot be turned off.** `MIRAGE_IDLE_GRACE_SECONDS`
+  defaults to 30: when the last workspace is removed the registry arms a timer and the app
+  SIGTERMs itself — measured: exit **143**, 8 s after `DELETE`. `0` means "exit immediately", not
+  "never". The template bakes ten years (`315360000`; asyncio accepted it and a delete left the
+  daemon serving) and sets `restartPolicyType: ALWAYS` so even that eventual exit is a restart,
+  not an outage. **Read a daemon's idle/exit semantics before hosting it as a service.**
+- **Live workspaces are not reloaded after a restart; commits are.** The registry is an in-memory
+  dict; `state/`, `repos/` and `snapshots/` under `MIRAGE_HOME` persist on the volume. After
+  replacing the container `GET /v1/workspaces` was `[]`, but recreating the workspace by id and
+  `POST …/checkout {ref}` on the committed version brought `/hi.txt` back. The listing says
+  "commit before you redeploy; uncommitted RAM state is gone" rather than "persistent
+  workspaces".
+- **Script runtimes need an `exec`-mode mount, and JavaScript needs a module the package does not
+  ship.** On a `mode: write` mount `python -c` and `node -e` both fail with `root mount '/' is not
+  in EXEC mode` (exit 126). On `mode: exec`, Python runs in-process on Monty; `node` fails with
+  `the quickjs runtime needs a qjs-wasi.wasm module` until the quickjs-ng WASI build is present and
+  `MIRAGE_QUICKJS_HOME` points at its directory. The image pins `qjs-wasi.wasm` v0.16.2 by digest
+  under `/opt/quickjs` — `node -e "console.log(6*7)"` → `42`. **Test each advertised runtime, not
+  the first one.**
+- **Fail closed on the token.** Upstream's default `local` mode mints a token into a file a
+  deployer can never read, and an empty token in `token` mode would be an open remote shell over
+  mounted resources on a public URL. The entrypoint refuses to start on an empty or <16-char
+  `MIRAGE_AUTH_TOKEN`; the template supplies `${{secret(48)}}`. Verified: 401 without or with a
+  wrong bearer, 200 with the right one, 400 for a foreign Host, `/v1/health` 200 unauthenticated.
+- **Not wrapped: the FUSE sandbox.** Upstream's only Dockerfile is a FUSE host needing `SYS_ADMIN`
+  and `/dev/fuse`, which Railway does not grant; the daemon does not need it (the shell is
+  virtual — no `uname`, no `/etc/passwd`, but `curl` and `git` are Mirage's own commands over the
+  VFS). MCP is stdio-only, so no network pairing with DSH (§5.22) — a stdio child beside the agent
+  would be the route.
+- **Two harness slips worth recording.** A stale Python process on the Mac was already listening
+  on the host port I mapped, answering every probe with `401 unauthorized` and `server: uvicorn` —
+  indistinguishable from the daemon until `lsof -iTCP:<port>` named it; probe inside the
+  container (`docker exec … curl [::1]:PORT`) rather than through a host mapping. And `${V:0:12}`
+  is bash, not `sh` — "Bad substitution" inside `docker exec sh -c`; use `cut -c1-12`.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -995,6 +1059,9 @@ Networking / binding
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
 
 Build / verification discipline
+- **Railway's health probe sends `Host: healthcheck.railway.app`.** An app with a Host allowlist (Mirage, DSH-style trust fences) must include it or every deployment fails its health check with 400s in an otherwise healthy log (§5.23).
+- **Python servers cannot bind dual-stack under asyncio** (`IPV6_V6ONLY` is forced on `::`; `0.0.0.0` is invisible on the private network). Bind loopback and put `socat TCP6-LISTEN:PORT,ipv6only=0,fork,reuseaddr TCP4:127.0.0.1:INNER` in front; `Host` survives the relay (§5.23).
+- **Read a daemon's idle/exit semantics before hosting it.** Mirage SIGTERMs itself 30 s after its last workspace by default and `0` means exit-now; bake a huge grace and `restartPolicyType: ALWAYS` (§5.23).
 - **Never pipe a build into `tail`** (`docker build … | tail -4 && echo OK`): the pipeline's status is `tail`'s, so a failed build prints OK. Redirect to a log and test the build command's own exit status (§5.22).
 - **Probe the surface a control actually guards.** DSH's Host/Origin fence covers `/api`, not `/`; a bad-Host probe of `/` returns 401 and looks like the fence is absent. Read which routes a check applies to before declaring it present or missing (§5.22).
 - **When two silent services talk, put a logging forwarder between them.** Neither DSH's MCP client nor LongMemory logs a successful handshake; a 30-line HTTP forwarder made `initialize → 200`, `initialized → 202`, `tools/list → 200` visible (§5.22).
@@ -1119,6 +1186,7 @@ Docs
 | codeg | `codeg` | codeg (`xintaofei/codeg:0.30.7`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
 | Orca | `orca` | orca (`orca-ide` 1.4.203 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
+| Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

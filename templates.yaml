@@ -147,6 +147,37 @@ templates:
           - "docs/**"
           - "src-tauri/src/web/**"
 
+  - name: Mirage Daemon
+    template_repo: RockinPaul/mirage_railway_template
+    deploy_url: https://railway.com/deploy/mirage-daemon
+    notes: Upstream is 0.0.x "preview", releasing every 2-3 weeks; pin = PyPI version = tag v<version>. See guide §5.23.
+    upstreams:
+      - name: mirage-ai (PyPI)
+        repo: strukto-ai/mirage
+        kind: tag
+        pypi: mirage-ai
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+MIRAGE_VERSION=(?P<version>[\d.]+)'
+        relevant_paths:
+          - "python/mirage/server/**"
+          - "python/mirage/runtime/js/**"
+          - "python/mirage/workspace/store/**"
+          - "python/pyproject.toml"
+          - "docs/home/auth.mdx"
+          - "docs/home/cli.mdx"
+          - "docs/typescript/server-and-cli.mdx"
+      - name: quickjs-ng (qjs-wasi.wasm release asset)
+        repo: quickjs-ng/quickjs
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+QJS_VERSION=(?P<version>v[\d.]+)'
+
   - name: DSH + LongMemory
     template_repo: RockinPaul/dsh_railway_template
     deploy_url: https://railway.com/deploy/dsh-longmemory
