@@ -599,3 +599,25 @@ templates:
           - "frontend/next.config.ts"
           - "app-server/src/main.rs"
           - "**/quickwit*/**"
+  - name: HolyClaude Workstation
+    template_repo: RockinPaul/holyclaude_railway_template
+    deploy_url: https://railway.com/deploy/holyclaude-workstation
+    notes: Thin wrapper around upstream's published multi-arch image; the pin is the image tag = git tag v<version>. Upstream releases roughly weekly and sha-pins every build input. MIT glue over an AGPL-3.0 web UI (CloudCLI) and Anthropic's proprietary Claude Code. See guide §5.25.
+    upstreams:
+      - name: coderluii/holyclaude image
+        repo: CoderLuii/HolyClaude
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+HOLYCLAUDE_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "scripts/entrypoint.sh"
+          - "scripts/bootstrap.sh"
+          - "scripts/prepare-cli-persistence.sh"
+          - "s6-overlay/s6-rc.d/cloudcli/run"
+          - "docker-compose.yaml"
+          - "docs/configuration.md"
+          - "contracts/product-facts.json"
+          - "LICENSE"

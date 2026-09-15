@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-two templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-three templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents, HolyClaude Workstation).
 
 Template repositories built with it:
 
@@ -30,6 +30,7 @@ Template repositories built with it:
 | DSH + LongMemory | https://railway.com/deploy/dsh-longmemory | [dsh_railway_template](https://github.com/RockinPaul/dsh_railway_template) |
 | Mirage Daemon | https://railway.com/deploy/mirage-daemon | [mirage_railway_template](https://github.com/RockinPaul/mirage_railway_template) |
 | Yao Agents | https://railway.com/deploy/yao-agents | [yao_railway_template](https://github.com/RockinPaul/yao_railway_template) |
+| HolyClaude Workstation | https://railway.com/deploy/holyclaude-workstation | [holyclaude_railway_template](https://github.com/RockinPaul/holyclaude_railway_template) |
 
 ## Weekly upstream update assessment
 

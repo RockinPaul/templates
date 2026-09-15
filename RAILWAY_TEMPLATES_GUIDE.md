@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-two of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon** and **Yao Agents**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-three of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents** and **HolyClaude Workstation**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1073,6 +1073,88 @@ edge, the private IPv6 name answered 200 on 8080, and the bcrypt check on the sc
 a leaked SQLite file; and the interactive login was never exercised because `verify` is captcha-gated, so
 the rotation is proven at the hash layer only.
 
+### 5.25 A Compose-shaped image, a durable root that refuses symlinks, and a first-run land grab (HolyClaude Workstation)
+
+[HolyClaude](https://github.com/CoderLuii/HolyClaude) (MIT, ~2.6k stars) is an AI coding
+workstation in one container: Claude Code plus a browser UI (CloudCLI, upstream
+`siteboon/claudecodeui`, **AGPL-3.0**), a headless Chromium with Playwright, eight AI CLIs and
+around fifty dev tools, supervised by s6-overlay. Upstream publishes multi-arch images
+(`coderluii/holyclaude:1.6.1`, ~13 GB unpacked) and sha-pins every build input, so the template is
+a thin `FROM` plus one entrypoint. It is written for Docker Compose on a laptop or NAS — bind
+mounts, a port on `127.0.0.1`, and a human who creates the account in the browser — and each of
+those three assumptions needs an answer on Railway.
+
+**There was already a `holyclaude` template on the marketplace**, published by someone else in March
+2026: pinned to 1.1.3 (about thirty releases stale), **no volume at all** — so the Anthropic session,
+the workspace and the account were lost on every redeploy — seven required literal prompts and no
+healthcheck. Same situation as DSH: publishing a second one is justified when the difference is
+persistence and a closed front door, not branding. The slug `holyclaude` was taken; the new one is
+`holyclaude-workstation`.
+
+**The volume mounts at the application's state directory, not at `/data`.** This inverts the usual
+layout and it is not a preference. Upstream's persistence preflight fails closed with "Claude
+durable state must be a real directory" when `~/.claude` is a symbolic link, and mounting over
+`/home/claude` would hide the image-owned Claude Code binary at `~/.local/bin/claude` (upstream
+checks for that too and exits with a message about it). So the mount point *is* `~/.claude`, and
+everything else moves inside it: `DATABASE_PATH=/home/claude/.claude/.cloudcli/auth.db` puts the
+account database there, and `/workspace` — whose name is fixed, because upstream's s6 service
+script sets `WORKSPACES_ROOT=/workspace` literally — becomes a **symlink into the volume**. That is
+safe because CloudCLI `realpath`s the workspace root before comparing project paths against it, so
+both sides resolve to the same real path. **Read the upstream preflight before choosing a mount
+point**: an app that validates its own state directory dictates the layout.
+
+**THE EXPENSIVE FIVE MINUTES — the image's `WORKDIR` was the directory being replaced.** The
+entrypoint swaps `/workspace` for a symlink, and the image declares `WORKDIR /workspace`, so the
+entrypoint's own current directory was deleted underneath it. The boot then died with
+`shell-init: error retrieving current directory: getcwd: cannot access parent directories`,
+repeated by every later process, and finally `fatal: Unable to read current working directory` from
+git — nothing pointing at the symlink swap, and the container exited 128 three minutes after the
+actual mistake. Fix is one line, `cd /` at the top. **Generalises: before an entrypoint replaces,
+renames or unmounts a directory, step out of it — an inherited `WORKDIR` counts as being in it.**
+
+**A browser-registration first run is a land grab on a public domain.** CloudCLI is single-user:
+the first `POST /api/auth/register` creates the account and every later one returns **403**. Bound
+to `127.0.0.1` behind a Compose file that is a fine design. On a Railway domain it means the first
+person to reach the URL — a scanner, anyone the link is forwarded to — owns a machine holding the
+deployer's Anthropic session. The template therefore **creates the account from inside the
+container**, in a background loop that waits for `/api/auth/status` to answer and then registers
+`admin` with a `${{secret(24)}}` password, before the service is reachable. The body is piped into
+`curl --data-binary @-` rather than passed as an argument, so the password never enters the process
+table. **Generalises: whenever an upstream's onboarding is "open the page and claim it", the
+template must claim it first.**
+
+**An API-key variable that locks out the browser.** CloudCLI honours `API_KEY`, and it is tempting
+to offer it as a second lock. It is applied as `app.use('/api', validateApiKey)` — *every* `/api`
+request needs an `x-api-key` header, including the ones the web UI itself makes, so setting it
+makes the product unusable. The template documents it as "do not set". **Check where a middleware
+is mounted before advertising the variable that turns it on.**
+
+**A useful accident: the JWT secret rides the same volume.** CloudCLI auto-generates its signing
+secret into the database when `JWT_SECRET` is unset. With the database on the volume this needs no
+variable and gives a property worth advertising — a session issued before a redeploy still
+authenticates after it, measured with a token captured from the first container and replayed
+against a replacement.
+
+**Upstream's Compose hardening was not needed, and checking that mattered.** The quick-start Compose
+file asks for `cap_add: [SYS_ADMIN, SYS_PTRACE]`, `security_opt: [seccomp=unconfined]` and
+`shm_size: 2g` — none of which Railway grants. The image already bakes
+`CHROMIUM_FLAGS=--no-sandbox --disable-gpu --disable-dev-shm-usage`, so a Playwright screenshot
+succeeds in a container started with none of them, which is what was actually run rather than
+assumed. Contrast §5.21, where Orca genuinely needed `ELECTRON_DISABLE_SANDBOX` because Railway's
+seccomp denies `CLONE_NEWUSER`: same class of problem, opposite conclusion, and only a measurement
+tells them apart. **Note the local-test limit: Docker Desktop's `/dev/shm` default is 4 GB, not
+Docker's 64 MB, so the small-shm case cannot be reproduced on a Mac — it has to be read off the
+real deployment.**
+
+Other notes. Upstream's image ends as `root` on purpose and drops to `claude` itself through
+`s6-setuidgid`, so the wrapper must not add a `USER` line — the entrypoint needs root to chown the
+volume. Exported variables reach the s6 services because their run scripts use
+`#!/command/with-contenv`, which reads the environment s6-overlay snapshots from `/init`. The port
+is fixed at 3001 (`cloudcli --port 3001` is literal in the service script), so the domain is created
+with `targetPort: 3001`. And the size is real: ~13 GB unpacked is fine on Hobby and Pro but exceeds
+the **4 GB image limit on Free and Trial**, which belongs in the listing rather than in a support
+thread.
+
 ## 6. Documentation set
 
 **Check every documented default against the generated template config, not against your intent.**
@@ -1213,6 +1295,9 @@ Repos / CLI
 - Keep project names short and abort after any failed `railway init`; confirm the exact intended linked project ID before template provisioning so a parent directory's link cannot receive the deployment.
 - Sub-agent reports can get lost; have them write files.
 - **Before `git add` in a new folder, `git rev-parse --show-toplevel` must print that folder.** A parent directory that is itself a git repo swallows the add: `git init` guarded by `--is-inside-work-tree` did not run, and `git add -A` pushed 455 workspace files (agent config, memory notes, other projects) to a brand-new public repo. `git init` unconditionally in the new directory; prefer explicit paths over `-A` in directories you did not create this session.
+- **An inherited `WORKDIR` counts as being in the directory you are about to replace.** An entrypoint that swapped `/workspace` for a symlink deleted its own cwd; the boot then failed with `getcwd: cannot access parent directories` from every later process and exited 128 three minutes later, nothing pointing at the cause. `cd /` first.
+- **When an upstream's first run is "open the page and create an account", the template must create it first.** Single-user apps hand ownership to whoever reaches the URL first, and a public domain is reached by scanners. Register from inside the container before the service is exposed, piping the body into `curl --data-binary @-` so the password never enters the process table.
+- **An app that validates its own state directory dictates the mount point.** HolyClaude refuses to start when `~/.claude` is a symlink, so the volume mounts *there* and the workspace symlinks into it — the reverse of the usual `/data` layout. Read the upstream preflight before choosing where the volume goes.
 - A force-push does **not** remove a leaked commit from GitHub: it stays fetchable by hash (`repos/<r>/commits/<sha>`, full tree) and the repo activity feed lists the old hash next to the new one. Make the repo private at once, then delete and recreate it (`gh auth refresh -s delete_repo`, `gh repo delete`, `gh repo create`, push) and verify the old hashes return 404.
 - cognee `remember` may hang after finishing server-side; retry is a 1-second dedup.
 
@@ -1251,6 +1336,7 @@ Docs
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
+| HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | **Zero required fields**; `CLOUDCLI_PASSWORD=${{secret(24)}}`. Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account from inside the container before the public URL is reachable, since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
