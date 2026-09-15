@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-five of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop** and **Coddy**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-six of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy** and **PenguinHarness**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -198,6 +198,12 @@ After filling the definition through either route:
    ```bash
    railway templates publish <id> --category "AI/ML" --description "<= 75 chars" --readme-file TEMPLATE_OVERVIEW.md --image https://raw.githubusercontent.com/<upstream>/<tag>/docs/img/x.png
    ```
+   **Write every link in the overview as `[text](url)`.** The marketplace renderer strips
+   `<https://…>` autolinks as unknown tags, without an error and without failing the publish, so a
+   Deployment Dependencies section written in that style publishes with the URLs simply gone. Three
+   live listings shipped that way before anyone read the published `readme` back rather than the
+   local file (HolyClaude, Octop, Coddy — repaired 2026-09-16). Assert on the published copy:
+   `template(code:"…"){ readme }` should contain the same number of `https://` as the source.
    `--image` must be a URL (a local path fails with "Invalid image URL"); use a raw GitHub URL of an upstream screenshot or logo. Description longer than 75 characters is rejected. If upstream's banner is a GitHub **user-attachment** (`github.com/user-attachments/assets/…`) it is not a stable URL: curl gets 403 without a browser user agent and the redirect target is a signed S3 URL that expires in minutes. Download it with a browser UA, commit it to the template repo as `docs/cover.jpg`, and pass that raw URL (EverOS).
 4. One-click verification: create a short-named scratch project, confirm its exact linked ID, then run `railway deploy -t <code>`. If the template has empty required defaults the command prompts and dies without a TTY; pass `-v service.KEY=value`. Wait for the intended entry point to be ready and run §3.7 through the public domain for web apps or managed SSH for a private workspace. Check generated secrets' lengths without logging their values, then delete only the verified scratch project. Probe APIs with the **exact request bodies from your README**, not hand-typed ones: an EverOS `add` written from memory returned 422 "Field required: session_id" and then "messages.0.sender_id", which looks like a broken deploy but is only a wrong payload. Expect indexing lag: a keyword search right after a flush was empty for one to two seconds until the cascade worker had upserted the Markdown.
 5. Republishing later (new readme/description/image) is the same command; the code stays. Use the CLI for this rather than a hand-rolled `templatePublish` mutation — the raw endpoint can report a publishing block that is no longer in force (§4).
@@ -1376,6 +1382,64 @@ By deploying <Name> on Railway, you are one step closer to supporting a complete
 
 Description (≤ 75 chars) examples: "Registry and insight engine for coding-agent Skills, MCP servers, Agents." · "Tencent's open-source RAG knowledge base and agent platform." · "Code-intelligence MCP server for AI agents, with web UI."
 
+### 5.28 An upstream entrypoint worth keeping, and a default that is safe on a laptop and wrong on a URL (PenguinHarness)
+
+[PenguinHarness](https://github.com/Prism-Shadow/penguin-harness) (Apache-2.0, ~2.2k stars) is a
+multi-agent platform for building agent applications: one sentence in, a scaffolded and runnable
+agent app out, with a self-evolution loop and a Trace view over every model request. It is built to
+run locally — desktop app, CLI, or `docker compose` bound to `127.0.0.1` — and upstream publishes a
+multi-platform image, `hiyouga/penguinharness`, for the server.
+
+**The wrapper adds one guard and nothing else, because upstream's entrypoint was already right.**
+The usual thin-wrapper reflex is to replace the entrypoint, and here that would have been a
+regression. Upstream's script starts as root, `mkdir -p`s the data root, chowns **only its top
+level** (skipping even that when the mount already carries uid 1000, so a filesystem that refuses
+chown still boots), then `exec setpriv --reuid=1000 --regid=1000 --init-groups -- "$@"`. The
+`exec` matters: setpriv replaces itself, so the server keeps tini's direct child slot and SIGTERM
+reaches it with no relay. That is the same set of problems §5.24 and §5.25 solved by hand, already
+solved. **Read the upstream entrypoint before replacing it; the honest wrapper may be `ENV` plus one
+guard.**
+
+**Authentication was already on — the gap was the delivery channel.** Unlike Coddy (§5.27), every
+route except the install probe answers 401 with no session, measured across projects, sessions,
+settings, admin users and terminals. What is wrong for a hosted deployment is subtler than "no
+auth": with no password configured, the server generates one, creates the admin account, and prints
+a **one-time claim link to the container log**. On a laptop that is a good design. On a public URL it
+means the only way in is to open the deploy logs and read a framed box, and until somebody does, a
+privileged account sits unclaimed on an address anyone can reach. So the template pins
+`PENGUIN_SEED_ADMIN_PASSWORD=${{secret(24)}}` and refuses to boot without it. **The dangerous default
+is not always a missing gate. It can be a credential delivered through a channel your deployment
+does not have.**
+
+Worth copying: upstream enforces the password policy on the pinned value *before any insert*
+(a five-character override exits 1, verified), hashes with scrypt, throttles sign-in failures per
+username with an exponentially growing delay that **also applies to unknown usernames**, so the
+endpoint is not a user-existence oracle, and strips `PENGUIN_SEED_ADMIN_PASSWORD` from the
+environment handed to Agent-run commands, so a prompt-injected command cannot read it.
+
+**The seed has a lifecycle, and it is worth measuring rather than assuming.** The account is seeded
+only when `users.count() == 0`, and the stored password is flagged "initial" until someone changes
+it. While that flag stands, a boot whose configured value no longer matches the stored hash prints a
+claim link again — so rotating the Railway variable after the first deploy does **not** lock you
+out, it leaves a one-time link in the logs. Change the password in the app and no claim link is ever
+minted again, with or without the variable. All four states were measured on the real image; none of
+it is in the docs.
+
+**Second service in this portfolio that needed no socat.** `HOST=::` on Node gives one socket in
+`tcp6` with no separate v4 listener, and both `127.0.0.1` and `[::1]` answer — libuv, like Go's
+`net.Listen`, does not set `IPV6_V6ONLY`. Python's asyncio does. Three data points now: **test the
+bind, it is a property of the runtime.**
+
+**`ALWAYS`, not `ON_FAILURE`, again.** A clean SIGTERM exits 0. That is now two templates in a row
+where the restart policy was decided by actually killing the process and reading the code.
+
+Two platform notes this build turned up. First, `railway api` takes its document as a **positional**
+argument — there is no `--query` flag — and the CLI's stored credential moved from
+`config.json`'s `user.token` to **`user.accessToken`**, so a script that reads the old key sends
+`Bearer None` and fails at the *validation* layer with a message that looks unrelated to auth.
+Second, and worse, is §7's new entry: the marketplace readme renderer **silently strips
+`<https://…>` autolinks**.
+
 ---
 
 ## 7. Gotcha catalogue (quick reference)
@@ -1393,6 +1457,10 @@ Networking / binding
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
 
 Build / verification discipline
+- **The marketplace readme renderer strips `<https://…>` autolinks.** Use `[text](url)` everywhere in `TEMPLATE_OVERVIEW.md`, and verify by reading the *published* `readme` back, not the file you uploaded (§3.9).
+- **`railway api` takes the GraphQL document as a positional argument** — there is no `--query` flag — and the CLI's stored credential is `user.accessToken` in `~/.railway/config.json`, not `user.token`. Reading the old key sends `Bearer None`, which fails at the GraphQL *validation* layer with a message that never mentions auth (§5.28).
+- **Read the upstream entrypoint before replacing it.** PenguinHarness already chowned only the top level of its data root, tolerated a mount that refuses chown, and `exec setpriv`-ed in place so tini kept the server as its direct child. The honest wrapper was `ENV` plus one guard (§5.28).
+- **A dangerous default is not always a missing gate.** PenguinHarness authenticates every route; what made it wrong for a public URL was delivering the admin credential as a claim link in the container log — a channel a hosted deployment effectively does not have (§5.28).
 - **An app that generates its own `.env` may load it with `Overload`** — the file then silently beats every Railway variable for the keys it contains (Yao). Measure which side wins before documenting variables; patch the file from the entrypoint when the file wins (§5.24).
 - **A constant first-boot admin password is the template's problem.** Rotate it from a generated secret before the server accepts connections, and prove it at the hash layer when the login is captcha-gated (§5.24).
 - **Railway's health probe sends `Host: healthcheck.railway.app`.** An app with a Host allowlist (Mirage, DSH-style trust fences) must include it or every deployment fails its health check with 400s in an otherwise healthy log (§5.23).
@@ -1539,6 +1607,7 @@ Docs
 | HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | `CLOUDCLI_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=3001` (nothing to type). Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 | Octop | `octop` | octop (`python:3.12-slim` + the released PyPI wheel installed with uv, socat relay, 996 MB, state on a 5 GB volume at `/data`) — **1 service** | `OCTOP_DEFAULT_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. The published wheel already carries the built React dashboard, so upstream's npm stage is skipped; **pip cannot install it at all** (`ResolutionTooDeep`) so uv is mandatory, and `evdev` needs a compiler at build time. uvicorn cannot bind dual-stack → socat. Upstream already randomises the admin password into `credential.txt`; the template supplies a secret instead so it shows in the Railway UI, and deliberately does **not** re-apply it on later boots. `railway.json`'s healthcheck read back null — set on the service instance instead (§5.26) |
 | Coddy | `coddy` | coddy (`alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. Telegram gateway absent: the published image is built without that tag (§5.27) |
+| PenguinHarness | `penguinharness` | penguin (`hiyouga/penguinharness:0.2.11` upstream multi-arch image used as-is, state on a 5 GB volume at `/data`) — **1 service** | `PENGUIN_SEED_ADMIN_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. Upstream's own entrypoint already chowned only the top level of the data root and `exec setpriv`-ed in place, so the wrapper adds environment plus one guard and nothing else. Authentication is **on** by default — the hosted problem was the delivery channel: with no password configured the server prints a one-time claim link to the container log. Seeding happens only while no user exists, and the claim link returns while the password is still flagged initial, so rotating the variable leaves a way in rather than a lockout (all four states measured). Node binds dual-stack on `::` → **no socat**; `ALWAYS` because a clean SIGTERM exits 0 (§5.28) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

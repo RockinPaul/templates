@@ -667,3 +667,24 @@ templates:
           - "docs/operate/security.md"
           - "config.example.yaml"
           - "LICENSE"
+  - name: PenguinHarness
+    template_repo: RockinPaul/penguin_railway_template
+    deploy_url: https://railway.com/deploy/penguinharness
+    notes: Thin wrapper over upstream's own multi-arch image, kept unmodified — its entrypoint already prepares the data root and drops to uid 1000 with exec setpriv. The wrapper adds Railway environment plus a guard that refuses to start without a pinned admin password. The pin is the image tag = git tag with a v prefix. Apache-2.0. See guide §5.28.
+    upstreams:
+      - name: penguinharness image
+        repo: Prism-Shadow/penguin-harness
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+PENGUIN_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "docker/Dockerfile"
+          - "docker/entrypoint.sh"
+          - "docker/compose.yaml"
+          - "packages/server/src/config.ts"
+          - "packages/server/src/auth/auth-service.ts"
+          - "packages/docs/content/docs/quickstart-docker.en.md"
+          - "LICENSE"
