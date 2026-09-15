@@ -147,6 +147,29 @@ templates:
           - "docs/**"
           - "src-tauri/src/web/**"
 
+  - name: Yao Agents
+    template_repo: RockinPaul/yao_railway_template
+    deploy_url: https://railway.com/deploy/yao-agents
+    notes: Upstream tags 1.0.0-rcN several times a week and publishes multi-arch images; the pin is the image tag = git tag v<version>. Modified Apache-2.0 with commercial clauses. See guide §5.24.
+    upstreams:
+      - name: yaoapp/yao image
+        repo: YaoApp/yao
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+(-rc\d+)?$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+YAO_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "docker/production/**"
+          - "config/**"
+          - "setup/**"
+          - "openapi/user/**"
+          - "openapi/oauth/**"
+          - "cmd/start.go"
+          - "cmd/init.go"
+          - "LICENSE"
+
   - name: Mirage Daemon
     template_repo: RockinPaul/mirage_railway_template
     deploy_url: https://railway.com/deploy/mirage-daemon

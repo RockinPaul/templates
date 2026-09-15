@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-one of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory** and **Mirage Daemon**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-two of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon** and **Yao Agents**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1010,7 +1010,68 @@ template if assumed rather than measured.
 
 ---
 
+### 5.24 A published image with a constant root password, and an app whose own .env beats yours (Yao Agents)
+
+Yao is a self-hosted hub for AI agents — workspaces, a task board, dashboard, Open API, built-in
+MCP tools, desktop and Android clients. Upstream publishes multi-arch images (`yaoapp/yao`) and a
+production Dockerfile, and `yao start` on an empty directory installs its own application,
+migrates 28 tables into SQLite and creates a root user. The easy case (§5.20) — until the boot log
+prints `Email: root@yaoagents.com / Password: Yao123++`.
+
+- **A first-boot root password that is a constant is the template's problem, not the deployer's.**
+  The bundled `scripts/setup.ts` has `ROOT_USER_PASSWORD = "Yao123++"` hard-coded; every
+  installation gets it, and on a public URL that is an open admin until someone logs in and changes
+  it. The fix is upstream's own model layer: `yao run models.__yao.user.UpdateWhere
+  '::{"wheres":[{"column":"email","value":"root@yaoagents.com"}]}' '::{"password_hash":"<secret>"}'`
+  bcrypt-hashes on save. The entrypoint runs `yao init` (installs, migrates, runs the setup hook,
+  **exits** — 6 s), then rotates root from `YAO_ROOT_PASSWORD` before `yao start`, and re-applies it
+  on every boot so the Railway variable is the source of truth. **Prove the rotation at the layer the
+  login uses**: the browser login sits behind an OAuth guard *and an image captcha*, so it cannot be
+  scripted; `bcrypt.checkpw` against the stored hash — upstream default False, ours True, and after a
+  redeploy with a new secret the old one False — is the equivalent evidence. Say in the listing
+  that the check stopped there.
+- **The app's `.env` overrides your variables.** `config.go` loads `<app>/.env` with
+  `godotenv.Overload`, so a Railway variable for any key in that file is silently ignored — measured:
+  `YAO_PORT=8080 YAO_HOST=::` at first boot produced a `.env` with `5099`/`0.0.0.0` and the engine
+  listened there. The entrypoint rewrites `YAO_ENV`, `YAO_HOST`, `YAO_PORT` (and `DEFAULT_LLM` when
+  set) in the file on every boot; keys absent from the file — the provider API keys — pass through.
+  **When an app generates its own env file, find out which side wins before promising that
+  variables work.**
+- **Yao binds one IPv4 address, and dual-stack attempts crash it.** `YAO_HOST` of `::`, `[::]` and
+  `""` each logged `Listening :::8080` and then exited 1 with `Host :: not found` (a later component
+  resolves the host string). `0.0.0.0` is invisible on the private network (§5.17). Same fix as
+  Mirage (§5.23): engine on `127.0.0.1:5099`, socat dual-stack on the service port.
+- **The mount root is not an empty directory.** `yao init` refuses a non-empty directory, and a
+  Railway volume root holds `lost+found` — so the app lives in `YAO_ROOT=/data/yao`, a subdirectory.
+  Not `/data/app`: that is the base image's `VOLUME` path, and a local `docker run` shadows it with
+  an anonymous volume, which hides the bug in rehearsal (cf. §5.20's inherited-VOLUME note).
+- **Read the licence before the Dockerfile.** Yao's is a *modified* Apache-2.0: branding and the
+  certificate-verification logic must stay intact, and organisations with 50+ employees or over
+  USD 1M revenue need a commercial licence. A template changes neither, but the listing must carry
+  the clause verbatim rather than say "Apache-2.0".
+- **Agents run commands in the container by default.** `YAO_HOST_EXEC` defaults to true with
+  allow-lists (`FullAccess=false`); documented, with the switch to turn it off.
+- Upstream's docs site returned 404 throughout (`yaoagents.com/docs`, and the homepage). The
+  image, `yao --help`, the installed app tree and the Go source were the references — and were
+  enough. Release cadence: `1.0.0-rc18`→`rc22` in one week, all tagged as releases.
+
 ---
+
+---
+
+**Published 2026-09-15 and one-click verified.** Template id `3b36bf75-e190-452b-9375-349092dee359`,
+code `yao-agents`, category AI/ML, card image = the app's own 512×512 icon (`yao/data/icons/icon.png` at
+the pinned tag's commit), readme `TEMPLATE_OVERVIEW.md`. Generation captured the source repo, healthcheck
+`/`, ON_FAILURE, the domain and the `/data` mount (no size) and nulled `YAO_ROOT_PASSWORD` into a required
+field; a change set renamed the template and restored `${{secret(24)}}` with a description, then
+`templateVolumeUpdate` set 5120 MB. `railway deploy -t yao-agents` into a scratch project asked for
+**nothing**, reached SUCCESS in about 90 s, reproduced healthcheck, restart policy, domain, the 5 GB volume
+and a 24-character password; `/`, `/dashboard/auth/entry` and `/v1/user/entry` answered 200 through the
+edge, the private IPv6 name answered 200 on 8080, and the bcrypt check on the scratch's root row was
+`Yao123++` → False, its own `YAO_ROOT_PASSWORD` → True. Two things to know: upstream hashes passwords at
+**bcrypt cost 4** (`$2a$04$`, the library minimum), so the random secret — not the hash — is what protects
+a leaked SQLite file; and the interactive login was never exercised because `verify` is captcha-gated, so
+the rotation is proven at the hash layer only.
 
 ## 6. Documentation set
 
@@ -1059,6 +1120,8 @@ Networking / binding
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
 
 Build / verification discipline
+- **An app that generates its own `.env` may load it with `Overload`** — the file then silently beats every Railway variable for the keys it contains (Yao). Measure which side wins before documenting variables; patch the file from the entrypoint when the file wins (§5.24).
+- **A constant first-boot admin password is the template's problem.** Rotate it from a generated secret before the server accepts connections, and prove it at the hash layer when the login is captcha-gated (§5.24).
 - **Railway's health probe sends `Host: healthcheck.railway.app`.** An app with a Host allowlist (Mirage, DSH-style trust fences) must include it or every deployment fails its health check with 400s in an otherwise healthy log (§5.23).
 - **Python servers cannot bind dual-stack under asyncio** (`IPV6_V6ONLY` is forced on `::`; `0.0.0.0` is invisible on the private network). Bind loopback and put `socat TCP6-LISTEN:PORT,ipv6only=0,fork,reuseaddr TCP4:127.0.0.1:INNER` in front; `Host` survives the relay (§5.23).
 - **Read a daemon's idle/exit semantics before hosting it.** Mirage SIGTERMs itself 30 s after its last workspace by default and `0` means exit-now; bake a huge grace and `restartPolicyType: ALWAYS` (§5.23).
@@ -1187,6 +1250,7 @@ Docs
 | Orca | `orca` | orca (`orca-ide` 1.4.203 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
+| Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
