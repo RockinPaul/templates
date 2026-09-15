@@ -621,3 +621,26 @@ templates:
           - "docs/configuration.md"
           - "contracts/product-facts.json"
           - "LICENSE"
+  - name: Octop
+    template_repo: RockinPaul/octop_railway_template
+    deploy_url: https://railway.com/deploy/octop
+    notes: Installed from the released PyPI wheel (which ships the built dashboard) with uv, because pip cannot resolve the dependency tree. The pin is the PyPI version = git tag v<version>. MIT. See guide §5.26.
+    upstreams:
+      - name: octop
+        repo: TencentCloud/Octop
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+OCTOP_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "docker/Dockerfile"
+          - "docker/docker-entrypoint.sh"
+          - "docker/docker-compose.yml"
+          - "docs/configuration.md"
+          - "src/octop/config.py"
+          - "src/octop/api/routers/auth.py"
+          - ".env.example"
+          - "CHANGELOG.md"
+          - "LICENSE"

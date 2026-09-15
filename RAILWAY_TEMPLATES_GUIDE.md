@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-three of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents** and **HolyClaude Workstation**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-four of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation** and **Octop**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1218,6 +1218,76 @@ with `targetPort: 3001`. And the size is real: ~13 GB unpacked is fine on Hobby 
 the **4 GB image limit on Free and Trial**, which belongs in the listing rather than in a support
 thread.
 
+### 5.26 A published wheel that beats the upstream Dockerfile, and a resolver that cannot install it (Octop)
+
+[Octop](https://github.com/TencentCloud/Octop) (MIT, Tencent Cloud, ~2.5k stars, **v1.0.0 GA on
+2026-09-14** after roughly weekly releases) is a self-hosted multi-user AI assistant: one
+FastAPI/uvicorn process serving a React dashboard, an HTTP/SSE/WebSocket API, IM channels (Feishu,
+DingTalk, QQ, Discord, WeCom), cron, a RAG knowledge base, MCP connectors and ACP. Everything it
+owns lives under `~/.octop` — SQLite control plane by default — so it is a genuine one-service, one-
+volume template.
+
+**Upstream publishes no image, and that turned out not to matter.** Docker Hub and GHCR have
+nothing; upstream's `docker/Dockerfile` is a two-stage build that compiles the React dashboard with
+npm and then installs the Python app. But **the PyPI wheel already contains the built dashboard** —
+328 files, `index.html`, 212 JS/CSS assets, checked by listing the wheel — so the template installs
+the released package and skips the npm stage entirely. **Check the published artefact before
+reproducing an upstream build**: a wheel, a `.deb` or an npm package often carries the compiled
+front end that the Dockerfile builds from source.
+
+**THE INSTALL THAT CANNOT BE DONE WITH pip.** `pip install octop==1.0.0` fails after about nine
+minutes with `pip._vendor.resolvelib.resolvers.ResolutionTooDeep: 200000` — the dependency graph is
+past what pip's backtracking resolver will explore. Upstream never hits this because it only ever
+installs with **uv** and a frozen lockfile (`uv sync --frozen`). `uv pip install octop==1.0.0`
+resolves the same requirement in seconds. Then it fails again, differently: `evdev`, pulled in for
+the remote-desktop input feature, is a C extension with no wheel, so the build needs
+`build-essential` and `linux-libc-dev` (purged afterwards; the finished image is 996 MB).
+**Generalises: when a Python project ships a lockfile and a `uv sync` in its own Dockerfile, that is
+a statement that pip cannot resolve it — do not treat the resolver as interchangeable.**
+
+**The IPv4/IPv6 split, for the third time.** Octop is uvicorn on asyncio, so it cannot bind both
+families: measured in a container, `--host ::` answers on `[::1]:8088` and **not** on
+`127.0.0.1:8088`, while `--host 0.0.0.0` is invisible on Railway's IPv6-only private network. Same
+resolution as §5.23 and §5.24 — the server runs on `127.0.0.1` and
+`socat TCP6-LISTEN:${PORT},ipv6only=0,fork,reuseaddr TCP4:127.0.0.1:${OCTOP_PORT}` fronts it, which
+serves both families and passes `Host` through untouched. This is now a standing pattern for any
+Python web app on Railway, not a per-project discovery.
+
+**An upstream that already solved the admin-password problem, and a reason to override it anyway.**
+Unlike §5.24's Yao, Octop's own container entrypoint generates a random password when
+`OCTOP_DEFAULT_PASSWORD` is unset and writes it to `~/.octop/credential.txt` (their issue #502).
+That is safe, but on Railway the only way to read that file is an SSH session, so the template hands
+Octop a `${{secret(24)}}` instead and refuses to start without one — the password then lives in the
+service variables where the deploy UI shows it. A Railway-style secret passes Octop's policy
+(≥8 chars, letters and digits, plus a weak-password blacklist), verified by running `octop init`
+with one before building anything.
+
+**Deliberately *not* re-applied on every boot**, which is the opposite of the Yao decision and for a
+good reason: Yao's image shipped a *known constant* password, so re-applying was the only safe
+option; Octop's is unique per deployment and changeable in the web console, and upstream's own
+credential file says "if you changed the password inside the Web console, that password wins".
+Re-applying would silently revert a user's password change on the next redeploy. **Match the
+upstream's own semantics when it has them; only override when the default is unsafe.**
+
+**`railway.json`'s healthcheck was never applied — measured, not suspected.** The reference
+deployed SUCCESS with **zero** healthcheck lines in its build log. The deployment's
+`meta.propertyFileMapping` *does* list `deploy.healthcheckPath` → `$.deploy.healthcheckPath`, so the
+file was found and parsed, yet `meta.serviceManifest.deploy.healthcheckPath` and the service
+instance's `healthcheckPath` both read **null**. Setting it with `serviceInstanceUpdate` fixed it,
+and the next deployment logged `Starting Healthcheck` → `Path: /api/health` → five
+"service unavailable" retries → **`[1/1] Healthcheck succeeded!`** in 33 s (the app needs ~15 s to
+boot). This is the same trap as §5.25 seen from the other side, and the rule is now unconditional:
+**set `healthcheckPath` on the service instance, and grep the build log for `Starting Healthcheck`
+before believing a green deployment exercised one.** It also makes generation capture the value.
+
+Security posture is better than most of this portfolio: unauthenticated `/api/agents` returns
+**401**, a wrong password on `/api/auth/login` returns **401** and the generated one returns **200**
+with a JWT, and upstream ships real **login rate limiting** (`login_max_attempts: 5`,
+`login_lockout_seconds: 900`). The JWT signing secret is 32 random bytes generated on first boot
+under `~/.octop`, so it rides the volume — a token minted before the container was replaced still
+authenticated against the replacement. The standing caveat applies unchanged: agents run shell
+commands, so the blast radius of the URL is a shell.
+
 ## 6. Documentation set
 
 **Check every documented default against the generated template config, not against your intent.**
@@ -1363,7 +1433,9 @@ Repos / CLI
 - **An app that validates its own state directory dictates the mount point.** HolyClaude refuses to start when `~/.claude` is a symlink, so the volume mounts *there* and the workspace symlinks into it — the reverse of the usual `/data` layout. Read the upstream preflight before choosing where the volume goes.
 - **`railway templates publish` now requires a fixed readme skeleton.** Missing `# Deploy and Host`, `## About Hosting`, `## Why Deploy`, `## Common Use Cases`, `## Dependencies for` or `### Deployment Dependencies` fails the publish with the list of missing headings. Free-form overviews that published fine earlier will be refused on their next publish.
 - **The healthcheck probes the port in the `PORT` service variable — not the domain's target port, and not the image's `ENV PORT`.** A Dockerfile `ENV PORT=3001` is invisible to Railway's control plane. Without a `PORT` variable the probe finds nothing and the deploy fails with "service unavailable" on every attempt while the app is listening correctly. Declare `PORT`, and make sure the server actually honours it.
-- **A green reference deployment does not prove the healthcheck works.** `railway.json` is only applied once the service is properly connected to its repo, and before that no healthcheck runs at all — the build log simply has no `Starting Healthcheck` section. Grep for that string before treating a SUCCESS as healthcheck evidence.
+- **`pip` cannot install every Python project.** Octop's dependency graph exceeds pip's backtracking resolver — `ResolutionTooDeep: 200000` after ~9 minutes — while `uv` resolves it in seconds. When an upstream Dockerfile uses `uv sync --frozen`, treat that as a statement that pip will not work, not a style choice.
+- **Check the published artefact before reproducing an upstream build.** Octop's PyPI wheel already contains the compiled React dashboard, so the two-stage npm build in upstream's Dockerfile was unnecessary — a wheel, `.deb` or npm package often ships the front end pre-built.
+- **A green reference deployment does not prove the healthcheck works — and `railway.json`'s healthcheck may never be applied at all.** Measured on two separate templates: the deployment's `meta.propertyFileMapping` lists `deploy.healthcheckPath`, so the file was parsed, yet `serviceManifest.deploy.healthcheckPath` and the service instance's `healthcheckPath` both come back **null** and no healthcheck runs — the build log has no `Starting Healthcheck` section. Set the healthcheck on the service instance with `serviceInstanceUpdate` (which also makes template generation capture it), and grep the build log for `Starting Healthcheck` before treating a SUCCESS as healthcheck evidence.
 - **A service created with `serviceCreate(source:{repo})` over the API is not connected to GitHub.** It builds once, but pushes do not redeploy it and `railway templates create` refuses with "does not have a source that can be used to generate a template". Run `serviceConnect(id, input:{repo, branch})` afterwards, or use `railway add --repo`.
 - A force-push does **not** remove a leaked commit from GitHub: it stays fetchable by hash (`repos/<r>/commits/<sha>`, full tree) and the repo activity feed lists the old hash next to the new one. Make the repo private at once, then delete and recreate it (`gh auth refresh -s delete_repo`, `gh repo delete`, `gh repo create`, push) and verify the old hashes return 404.
 - cognee `remember` may hang after finishing server-side; retry is a 1-second dedup.
@@ -1404,6 +1476,7 @@ Docs
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
 | HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | `CLOUDCLI_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=3001` (nothing to type). Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
+| Octop | `octop` | octop (`python:3.12-slim` + the released PyPI wheel installed with uv, socat relay, 996 MB, state on a 5 GB volume at `/data`) — **1 service** | `OCTOP_DEFAULT_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. The published wheel already carries the built React dashboard, so upstream's npm stage is skipped; **pip cannot install it at all** (`ResolutionTooDeep`) so uv is mandatory, and `evdev` needs a compiler at build time. uvicorn cannot bind dual-stack → socat. Upstream already randomises the admin password into `credential.txt`; the template supplies a secret instead so it shows in the Railway UI, and deliberately does **not** re-apply it on later boots. `railway.json`'s healthcheck read back null — set on the service instance instead (§5.26) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
