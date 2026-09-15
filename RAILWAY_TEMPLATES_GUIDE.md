@@ -1167,7 +1167,47 @@ assumed. Contrast §5.21, where Orca genuinely needed `ELECTRON_DISABLE_SANDBOX`
 seccomp denies `CLONE_NEWUSER`: same class of problem, opposite conclusion, and only a measurement
 tells them apart. **Note the local-test limit: Docker Desktop's `/dev/shm` default is 4 GB, not
 Docker's 64 MB, so the small-shm case cannot be reproduced on a Mac — it has to be read off the
-real deployment.**
+real deployment, where it turned out to be 62 MB.**
+
+**Two platform facts learned at publish time, both new since the previous template an hour
+earlier.** First, `railway templates publish` now **rejects a marketplace readme that lacks a fixed
+section skeleton**: `# Deploy and Host`, `## About Hosting`, `## Why Deploy`, `## Common Use Cases`,
+`## Dependencies for` and `### Deployment Dependencies`. The error names the missing headings and
+the publish does nothing, so the fix is mechanical — but a `TEMPLATE_OVERVIEW.md` written in the
+older free-form style (every earlier template in this repository) will be refused on its next
+publish. Second, **a service created through the GraphQL API with `source: {repo}` is not enough for
+template generation**: `railway templates create` answers "Service holyclaude does not have a source
+that can be used to generate a template", and pushing to the repo does not trigger a redeploy
+either. `serviceConnect(id, input:{repo, branch})` wires the actual GitHub connection and both work
+afterwards. Prefer the CLI's own `railway add --repo`, or run `serviceConnect` straight after
+`serviceCreate`.
+
+**THE FAILURE THE ONE-CLICK CAUGHT — Railway's healthcheck probes `PORT`, not the domain's target
+port.** The first one-click deploy of the published template **failed**: eighteen attempts over the
+full ten-minute window, every one "service unavailable", while the container log showed CloudCLI
+ready four seconds after start and `ss` would have shown `*:3001`. The service had a domain with
+`targetPort: 3001` and a `healthcheckPath` of `/`, and that is not what the probe uses — it uses the
+port named by the **`PORT` service variable**, and with none set it finds nothing. Setting
+`PORT=3001` on the service made the same deployment pass in about a minute.
+
+Two things made this survive all the way to publish. The image sets `ENV PORT=3001`, which the
+container sees but **Railway's control plane does not** — a Dockerfile `ENV` is not a service
+variable. And the reference project had never caught it, because **`railway.json` was only applied
+after `serviceConnect`**: before that its build logs contain no healthcheck section at all, so the
+"SUCCESS" that had been treated as verification was a deploy with no healthcheck in it. A green
+reference is not evidence that the healthcheck works — **grep the build log for `Starting
+Healthcheck` before believing it**.
+
+The fix has two halves, because declaring the variable alone leaves a trap: upstream's s6 service
+script runs `cloudcli --port 3001` literally, so a deployer who changed `PORT` would move the probe
+and not the server. The template therefore declares `PORT=3001` (a prefilled, non-blocking field)
+**and** ships upstream's service script with `--port "${PORT:-3001}"`, verified by booting with
+`PORT=8080` and watching the server listen on 8080.
+
+**And the `/dev/shm` question, answered on the real deployment: Railway gives 62 MB**, close to
+Docker's 64 MB default and nothing like Docker Desktop's 4 GB. A Playwright screenshot still
+succeeded there, because the image bakes `--disable-dev-shm-usage` — so the conclusion above holds,
+but only because it was checked on Railway rather than on the Mac.
 
 Other notes. Upstream's image ends as `root` on purpose and drops to `claude` itself through
 `s6-setuidgid`, so the wrapper must not add a `USER` line — the entrypoint needs root to chown the
@@ -1321,6 +1361,10 @@ Repos / CLI
 - **An inherited `WORKDIR` counts as being in the directory you are about to replace.** An entrypoint that swapped `/workspace` for a symlink deleted its own cwd; the boot then failed with `getcwd: cannot access parent directories` from every later process and exited 128 three minutes later, nothing pointing at the cause. `cd /` first.
 - **When an upstream's first run is "open the page and create an account", the template must create it first — before the public listener exists.** Single-user apps hand ownership to whoever reaches the URL first. A background job that registers while the real server starts is not enough: Railway's healthcheck passes the moment the server listens, which is the moment the edge starts routing, and on Railway that job did not survive the `exec /init` handoff to s6-overlay at all. Start a loopback-only instance during the entrypoint, register against it, stop it, then start the real one — and fail closed if that does not work. Pipe the body into `curl --data-binary @-` so the password never enters the process table.
 - **An app that validates its own state directory dictates the mount point.** HolyClaude refuses to start when `~/.claude` is a symlink, so the volume mounts *there* and the workspace symlinks into it — the reverse of the usual `/data` layout. Read the upstream preflight before choosing where the volume goes.
+- **`railway templates publish` now requires a fixed readme skeleton.** Missing `# Deploy and Host`, `## About Hosting`, `## Why Deploy`, `## Common Use Cases`, `## Dependencies for` or `### Deployment Dependencies` fails the publish with the list of missing headings. Free-form overviews that published fine earlier will be refused on their next publish.
+- **The healthcheck probes the port in the `PORT` service variable — not the domain's target port, and not the image's `ENV PORT`.** A Dockerfile `ENV PORT=3001` is invisible to Railway's control plane. Without a `PORT` variable the probe finds nothing and the deploy fails with "service unavailable" on every attempt while the app is listening correctly. Declare `PORT`, and make sure the server actually honours it.
+- **A green reference deployment does not prove the healthcheck works.** `railway.json` is only applied once the service is properly connected to its repo, and before that no healthcheck runs at all — the build log simply has no `Starting Healthcheck` section. Grep for that string before treating a SUCCESS as healthcheck evidence.
+- **A service created with `serviceCreate(source:{repo})` over the API is not connected to GitHub.** It builds once, but pushes do not redeploy it and `railway templates create` refuses with "does not have a source that can be used to generate a template". Run `serviceConnect(id, input:{repo, branch})` afterwards, or use `railway add --repo`.
 - A force-push does **not** remove a leaked commit from GitHub: it stays fetchable by hash (`repos/<r>/commits/<sha>`, full tree) and the repo activity feed lists the old hash next to the new one. Make the repo private at once, then delete and recreate it (`gh auth refresh -s delete_repo`, `gh repo delete`, `gh repo create`, push) and verify the old hashes return 404.
 - cognee `remember` may hang after finishing server-side; retry is a 1-second dedup.
 
@@ -1359,7 +1403,7 @@ Docs
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
-| HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | **Zero required fields**; `CLOUDCLI_PASSWORD=${{secret(24)}}`. Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
+| HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | `CLOUDCLI_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=3001` (nothing to type). Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
