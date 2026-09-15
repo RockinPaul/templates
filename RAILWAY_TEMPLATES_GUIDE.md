@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing nineteen of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg** and **Orca**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca** and **DSH + LongMemory**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -865,6 +865,82 @@ is only readable from the deploy log, and that sessions end on redeploy.
 
 ---
 
+### 5.22 A loopback-only web surface, a trust fence, and an agent that remembers (DSH + LongMemory)
+
+DSH is DeepSeek Harness, DeepSeek's coding agent, with a browser UI. Three templates for it already
+sat on the marketplace; all three were pinned to `0.1.0-rc.6`/`rc.7` from mid-August, and all three
+wrapped it in Caddy basic auth on the premise that the app had no authentication. That premise was
+true when they were built and false a week later: upstream shipped browser-session authentication,
+a Host/Origin trust fence and a `--trusted-host` flag on 2026-08-24. This template pins npm
+`latest` (`0.1.5-rc.1`), relies on the app's own auth, and pairs it with a LongMemory MCP server
+from the §5.17 template so the agent has memory across sessions. Zero required composer fields.
+
+- **Read the upstream's security model before deciding it has none.** `packages/client/connection`
+  documents it precisely: every Host RPC method and WebSocket needs a browser session; each process
+  mints a launch token; `GET /?token=` exchanges it once for a 30-day signed cookie bound to the
+  request authority; the signing secret is a credential record in `$DSH_HOME/.credentials.yaml`.
+  Before authentication, a trust fence on `/api` requires the request `Host` to be loopback or a
+  trusted host, and any `Origin` to equal it — 403 on failure, 401 for trusted-but-unauthenticated.
+  Measured through Railway's edge: `/` 401 without a cookie, token → 303 + `Set-Cookie`, then 200;
+  WebSocket upgrade 101 with the cookie, 401 without, **403 with a foreign `Host` or `Origin`**.
+- **"Refuses to bind 0.0.0.0" means the proxy lives in the same container.** `dsh --profile web`
+  binds loopback only by design and rejects `--host 0.0.0.0`; a sibling Caddy service cannot reach
+  it over the private network. So Caddy's static binary is copied from `caddy:2.11-alpine` into the
+  Node image, runs as the same unprivileged user in the background under tini, answers `/up` for the
+  health check, and proxies `127.0.0.1:7000`. If Caddy dies the health check fails and Railway
+  restarts the container.
+- **Pass `Host` through and register the public domain as trusted — this is the tlbx trap (§5.19)
+  with a documented reason and a documented escape hatch.** The entrypoint appends
+  `--trusted-host "$RAILWAY_PUBLIC_DOMAIN"` (plus `DSH_TRUSTED_HOSTS` for custom domains); Caddy's
+  HTTP transport leaves `Host` alone by default. Note the fence applies to `/api`, not to the index
+  route: probing `/` with a bad `Host` returns 401 (cookie authority mismatch), which looks like the
+  fence is missing. **Probe the fenced surface, `/api/remote.mux`, or you will conclude wrongly in
+  either direction.**
+- **The launch token rotates per process; the cookie does not.** Because the signing secret lives
+  on the volume, a cookie issued by container A authenticated on container B — HTTP 200 and a 101
+  upgrade — while A's and B's launch tokens differed. Redeploys therefore do not sign users out.
+  Proven by *replacing* the container, not restarting it (§5.21).
+- **npm `latest` is an rc, and the built frontend is a separate package.** `@deepseek-ai/dsh` is
+  49 KB; the servable GUI exists only because `dsh-web-app` hard-depends on
+  `@deepseek-ai/dsh-web-frontend` (4.7 MB, 91 files). Check the dependency graph before assuming a
+  CLI package ships its UI. Upstream has never published a stable release; tags are `dsh-v<semver>`
+  with `-alpha.N`/`-rc.N`, so the manifest's `tag_pattern` must admit prereleases and the notes must
+  say the pin moves every few days.
+- **`node:22` already owns uid 1000.** `useradd -u 1000` failed with exit 4 (`node` exists). And the
+  first build's "OK" was `docker build … | tail -4 && echo OK` — `tail`'s exit status masked the
+  failure. **Never pipe a build into `tail`; redirect to a log and test the build's own status.**
+  `userdel -r node` also left `/home/node` behind; remove the directory explicitly.
+- **The MCP client's reconnect budget is shorter than a sibling's source build.** Defaults: 10
+  attempts, 500 ms doubling to a 30 s ceiling — about 151 s, then it gives up until the next
+  process start. `dsh` (npm install) reaches SUCCESS in ~2 min; LongMemory builds from source in
+  2–5 min. On a one-click deploy the memory tools would silently never appear. The overlay sets
+  `reconnect.maxAttempts: 240`; measured locally, tools were discovered after the server appeared
+  200 s late, with the harness serving throughout. **Whenever a client dials a sibling at boot,
+  compare its give-up time with the sibling's build time.**
+- **Streamable-HTTP MCP with a bearer header is a config row.** `@deepseek-ai/dsh-mcp-client` with
+  `transport: streamable-http`, `url`, `headers.Authorization` (both via `!!js process.env.*`),
+  applied by the entrypoint as `--patch /etc/dsh/longmemory.cordis.patch.yml` only when
+  `LONGMEMORY_MCP_URL` is set. The launcher flag must precede `--profile`. The client connects at
+  boot and logs nothing on success, and LongMemory logs nothing per request — the handshake was
+  made visible with a tiny logging forwarder between them: `initialize → 200`,
+  `notifications/initialized → 202`, `tools/list → 200` (13 tools). **When two silent services
+  talk, put a logging proxy between them rather than inferring from the absence of errors.**
+- **Trademark hygiene is part of the listing.** Upstream's `BRAND_GUIDELINES.md` asks that project
+  names avoid the full "DeepSeek Harness" mark and use "DSH"; two of the three existing templates
+  use the full mark in their names, and the card image for this one deliberately uses no DeepSeek
+  brand asset. The overview states "built on DeepSeek Harness; not affiliated with or endorsed by
+  DeepSeek", which the guidelines explicitly permit.
+- **Optional-but-empty is the right shape for a key the UI can take.** `DEEPSEEK_API_KEY` is
+  `isOptional: true` with an empty default and a description pointing at *Settings → Models*; the
+  harness resolves the key through its credentials store first and the environment second, and
+  persists a UI-entered key on the volume. The entrypoint warns when it is empty rather than
+  refusing to boot.
+- Platform notes: `variableUpsert` on a service triggers a redeploy (the rotated LongMemory key
+  superseded an in-flight build); `serviceInstanceUpdate` of `rootDirectory` does too; and
+  `caddy hash-password` needs a newline-terminated line on stdin or fails with `EOF`.
+
+---
+
 ---
 
 ## 6. Documentation set
@@ -912,6 +988,12 @@ Networking / binding
 - Unix socket paths > 104 chars fail (put sockets in `/tmp`).
 - Caddy `header Authorization "Bearer {$TOKEN}"` matcher: leading/trailing `*` is a wildcard, `"` breaks the config; validate the token charset `[A-Za-z0-9_-]` and length in the entrypoint.
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
+
+Build / verification discipline
+- **Never pipe a build into `tail`** (`docker build … | tail -4 && echo OK`): the pipeline's status is `tail`'s, so a failed build prints OK. Redirect to a log and test the build command's own exit status (§5.22).
+- **Probe the surface a control actually guards.** DSH's Host/Origin fence covers `/api`, not `/`; a bad-Host probe of `/` returns 401 and looks like the fence is absent. Read which routes a check applies to before declaring it present or missing (§5.22).
+- **When two silent services talk, put a logging forwarder between them.** Neither DSH's MCP client nor LongMemory logs a successful handshake; a 30-line HTTP forwarder made `initialize → 200`, `initialized → 202`, `tools/list → 200` visible (§5.22).
+- **Compare a boot-time client's give-up time with its sibling's build time.** DSH's MCP client retried for ~151 s by default while LongMemory's source build takes 2–5 min; on a one-click deploy the tools would silently never appear. Raise the budget in the client's config (§5.22).
 
 Volumes / processes
 - `lost+found` at the mount root: `PGDATA` subdirectory; Redis 8.2 skips permission fixes (rmdir it); apps as non-root can't write (chown as root, then drop).
@@ -1031,6 +1113,7 @@ Docs
 | tlbx | `tlbx` | tlbx (`mt` release binary v10.16.2 + mise on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy, app preview cannot work (`PORT+1` origin), and there is no Docker — all three stated in the listing (§5.19) |
 | codeg | `codeg` | codeg (`xintaofei/codeg:0.30.7`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
 | Orca | `orca` | orca (`orca-ide` 1.4.203 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
+| DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

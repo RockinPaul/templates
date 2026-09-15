@@ -147,6 +147,47 @@ templates:
           - "docs/**"
           - "src-tauri/src/web/**"
 
+  - name: DSH + LongMemory
+    template_repo: RockinPaul/dsh_railway_template
+    deploy_url: https://railway.com/deploy/dsh-longmemory
+    notes: Upstream ships prereleases only (alpha/rc every few days); the pin is an npm version whose git tag is dsh-v<version>. LongMemory is pinned in its own template repo. See guide §5.22.
+    upstreams:
+      - name: dsh (npm package @deepseek-ai/dsh)
+        repo: deepseek-ai/deepseek-harness
+        kind: tag
+        tag_formats: ["dsh-v{version}"]
+        tag_pattern: '^dsh-v\d+\.\d+\.\d+(-(alpha|rc)\.\d+)?$'
+        pins:
+          - file: dsh/Dockerfile
+            pattern: '^ARG\s+DSH_VERSION=(?P<version>[0-9][\w.-]*)'
+        relevant_paths:
+          - "packages/client/connection/**"
+          - "packages/host/webserver/**"
+          - "packages/host/frontend-static/**"
+          - "packages/bundle/web-app/**"
+          - "packages/mcp/mcp-client/**"
+          - "apps/cli/src/**"
+          - "docs/subsystems/web-server.md"
+          - "docs/subsystems/web-client.md"
+          - "docs/subsystems/mcp.md"
+          - "BRAND_GUIDELINES.md"
+      - name: mise
+        repo: jdx/mise
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d{4}\.\d+\.\d+$'
+        pins:
+          - file: dsh/Dockerfile
+            pattern: '^ARG\s+MISE_VERSION=(?P<version>v[\d.]+)'
+      - name: caddy (binary copied from the pinned image)
+        repo: caddyserver/caddy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: dsh/Dockerfile
+            pattern: '^COPY\s+--from=caddy:(?P<version>[\d.]+)-alpine'
+
   - name: Orca
     template_repo: RockinPaul/orca_railway_template
     deploy_url: https://railway.com/deploy/orca
