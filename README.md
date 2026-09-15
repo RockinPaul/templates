@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-four templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents, HolyClaude Workstation, Octop).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-five templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents, HolyClaude Workstation, Octop, Coddy).
 
 Template repositories built with it:
 
@@ -32,6 +32,7 @@ Template repositories built with it:
 | Yao Agents | https://railway.com/deploy/yao-agents | [yao_railway_template](https://github.com/RockinPaul/yao_railway_template) |
 | HolyClaude Workstation | https://railway.com/deploy/holyclaude-workstation | [holyclaude_railway_template](https://github.com/RockinPaul/holyclaude_railway_template) |
 | Octop | https://railway.com/deploy/octop | [octop_railway_template](https://github.com/RockinPaul/octop_railway_template) |
+| Coddy | https://railway.com/deploy/coddy | [coddy_railway_template](https://github.com/RockinPaul/coddy_railway_template) |
 
 ## Weekly upstream update assessment
 

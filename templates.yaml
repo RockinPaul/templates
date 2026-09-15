@@ -644,3 +644,26 @@ templates:
           - ".env.example"
           - "CHANGELOG.md"
           - "LICENSE"
+  - name: Coddy
+    template_repo: RockinPaul/coddy_railway_template
+    deploy_url: https://railway.com/deploy/coddy
+    notes: Thin wrapper that copies upstream's static Go binary out of its published scratch image onto Alpine (scratch has no shell for an entrypoint). The pin is the image tag = git tag <version>, no v prefix. MIT. See guide §5.27.
+    upstreams:
+      - name: coddy-agent image
+        repo: coddy-project/coddy-agent
+        kind: tag
+        tag_formats: ["{version}"]
+        tag_pattern: '^\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+CODDY_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "Dockerfile"
+          - "docker-compose.yml"
+          - "cmd/coddy/serve.go"
+          - "external/httpserver/serve.go"
+          - "docs/reference/environment-variables.md"
+          - "docs/reference/http-api.md"
+          - "docs/operate/security.md"
+          - "config.example.yaml"
+          - "LICENSE"

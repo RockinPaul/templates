@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-four of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation** and **Octop**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-five of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop** and **Coddy**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1288,6 +1288,64 @@ under `~/.octop`, so it rides the volume — a token minted before the container
 authenticated against the replacement. The standing caveat applies unchanged: agents run shell
 commands, so the blast radius of the URL is a shell.
 
+### 5.27 A scratch image with no shell, and the first Go service that needed no relay (Coddy)
+
+[Coddy](https://github.com/coddy-project/coddy-agent) (MIT, ~145 stars but several releases a day —
+1.1.32 landed during the build) is a general-purpose agent in one static Go binary: a web UI, an
+OpenAI-compatible `/v1/*` API, a `/coddy` REST surface, a cron scheduler, a swarm relay and a remote
+mode, all sharing one set of sessions. Upstream publishes `ghcr.io/coddy-project/coddy-agent`, and
+the finished template image is **57 MB** — the smallest in this portfolio by an order of magnitude.
+
+**The published image is `scratch`, which is a problem to solve rather than a base to inherit.**
+A `FROM scratch` image has no shell, so there is nowhere to validate credentials, create the volume
+subdirectories, or do anything else before the server starts. The resolution is the reverse of the
+usual thin wrapper: instead of `FROM <upstream>` plus an entrypoint, copy the binary *out* —
+`COPY --from=ghcr.io/coddy-project/coddy-agent:1.1.32 /bin/coddy /usr/local/bin/coddy` onto
+`alpine:3.22`. Nothing upstream builds is rebuilt, and the wrapper gets a shell. **Generalises: a
+distroless or scratch upstream is still usable; take the binary rather than the image.**
+
+**The first Go service here that did not need socat.** Three templates in a row (§5.23, §5.24,
+§5.26) had to put a relay in front because their runtime could not bind both address families.
+Coddy is Go, and `coddy serve -H ::` logs `addr=[::]:8080` and answers on **both** `127.0.0.1` and
+`[::1]` — measured from a sidecar sharing the container's network namespace, because a `scratch`
+image has no shell to curl from. Go's `net.Listen` does not set `IPV6_V6ONLY`; Python's asyncio
+does. **Test the bind before reaching for the relay: the pattern is a property of the runtime, not
+of Railway.**
+
+**Authentication is off by default, and the template makes it mandatory.** Upstream is explicit —
+"Authentication is off by default (historical behavior)" — and logs a "reachable without
+authentication" warning when binding a non-loopback address without a token. On a public domain that
+warning describes an agent with shell tools open to whoever finds the URL, so the entrypoint fails
+closed on both credentials rather than passing the warning along:
+`CODDY_HTTP_TOKEN` (bearer, gates `/v1/*` and `/coddy/*`) and `CODDY_HTTP_PASSWORD` (the browser's
+credential for the same gate, since the SPA has no field to type a token into). Both are
+`${{secret(...)}}`, so the deploy form still asks for nothing.
+
+Upstream's own handling of the password is worth copying elsewhere: it is hashed with **argon2id**
+as the server starts, never written into `config.yaml`, and there is **deliberately no
+command-line flag** for it — the docs say "a password on a command line is visible in `ps`". The
+template passes it as an environment variable for the same reason, and pipes nothing through `ps`.
+
+Measured through Railway's edge, not read from the docs: `/v1/models` **401** with no token and
+**401** with a wrong one, **200** with the right one; browser sign-in **401** on a wrong password and
+**200** on the right one with an `HttpOnly; SameSite=Strict` cookie; and a sign-in attempt without a
+matching `Origin` refused **403 `cross-site sign-in refused`** — CSRF is handled upstream.
+
+**`ALWAYS`, not `ON_FAILURE`.** Killing the server in rehearsal produced **exit 0** — a clean
+SIGTERM shutdown — and `ON_FAILURE` does not restart a zero exit. For a process that should never
+end on its own, `ALWAYS` is the correct policy, and the difference only shows up if you actually
+kill the thing and read the exit code. **Check what your service does on SIGTERM before choosing a
+restart policy.**
+
+Smaller findings. `coddy serve` starts with **no `config.yaml` at all** (verified on an empty
+volume) and writes none; a provider key in the environment is enough for a real model to appear in
+`/v1/models` — so the template ships no config file and no seeding logic. The healthcheck is `/`,
+which stays public by design "so a client can load and prompt for the token", while `/docs` and
+`/openapi.json` are gated with everything else. And the published image is built **without** the
+`gateway` build tag, so the Telegram gateway is absent from this template — stated in the listing
+rather than worked around, since fixing it would mean building the Go project instead of pinning
+upstream's artefact.
+
 ## 6. Documentation set
 
 **Check every documented default against the generated template config, not against your intent.**
@@ -1434,6 +1492,9 @@ Repos / CLI
 - **`railway templates publish` now requires a fixed readme skeleton.** Missing `# Deploy and Host`, `## About Hosting`, `## Why Deploy`, `## Common Use Cases`, `## Dependencies for` or `### Deployment Dependencies` fails the publish with the list of missing headings. Free-form overviews that published fine earlier will be refused on their next publish.
 - **The healthcheck probes the port in the `PORT` service variable — not the domain's target port, and not the image's `ENV PORT`.** A Dockerfile `ENV PORT=3001` is invisible to Railway's control plane. Without a `PORT` variable the probe finds nothing and the deploy fails with "service unavailable" on every attempt while the app is listening correctly. Declare `PORT`, and make sure the server actually honours it.
 - **`pip` cannot install every Python project.** Octop's dependency graph exceeds pip's backtracking resolver — `ResolutionTooDeep: 200000` after ~9 minutes — while `uv` resolves it in seconds. When an upstream Dockerfile uses `uv sync --frozen`, treat that as a statement that pip will not work, not a style choice.
+- **A `scratch` or distroless upstream image is still usable — copy the binary out, do not inherit the image.** With no shell there is nowhere to validate credentials or prepare the volume before the server starts. `COPY --from=<upstream> /bin/app /usr/local/bin/app` onto a small base keeps upstream's artefact and gains an entrypoint.
+- **Check what the process does on SIGTERM before choosing a restart policy.** A clean shutdown exits `0`, and `ON_FAILURE` does not restart a zero exit — a server that should never end on its own wants `ALWAYS`. Kill it in rehearsal and read the exit code rather than assuming.
+- **Not every runtime needs the socat relay — test the bind.** Go's `net.Listen` on `::` is dual-stack (both `127.0.0.1` and `[::1]` answer); Python's asyncio sets `IPV6_V6ONLY` and is not. The relay is a property of the runtime, not of Railway.
 - **Check the published artefact before reproducing an upstream build.** Octop's PyPI wheel already contains the compiled React dashboard, so the two-stage npm build in upstream's Dockerfile was unnecessary — a wheel, `.deb` or npm package often ships the front end pre-built.
 - **A green reference deployment does not prove the healthcheck works — and `railway.json`'s healthcheck may never be applied at all.** Measured on two separate templates: the deployment's `meta.propertyFileMapping` lists `deploy.healthcheckPath`, so the file was parsed, yet `serviceManifest.deploy.healthcheckPath` and the service instance's `healthcheckPath` both come back **null** and no healthcheck runs — the build log has no `Starting Healthcheck` section. Set the healthcheck on the service instance with `serviceInstanceUpdate` (which also makes template generation capture it), and grep the build log for `Starting Healthcheck` before treating a SUCCESS as healthcheck evidence.
 - **A service created with `serviceCreate(source:{repo})` over the API is not connected to GitHub.** It builds once, but pushes do not redeploy it and `railway templates create` refuses with "does not have a source that can be used to generate a template". Run `serviceConnect(id, input:{repo, branch})` afterwards, or use `railway add --repo`.
@@ -1477,6 +1538,7 @@ Docs
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
 | HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | `CLOUDCLI_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=3001` (nothing to type). Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 | Octop | `octop` | octop (`python:3.12-slim` + the released PyPI wheel installed with uv, socat relay, 996 MB, state on a 5 GB volume at `/data`) — **1 service** | `OCTOP_DEFAULT_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. The published wheel already carries the built React dashboard, so upstream's npm stage is skipped; **pip cannot install it at all** (`ResolutionTooDeep`) so uv is mandatory, and `evdev` needs a compiler at build time. uvicorn cannot bind dual-stack → socat. Upstream already randomises the admin password into `credential.txt`; the template supplies a secret instead so it shows in the Railway UI, and deliberately does **not** re-apply it on later boots. `railway.json`'s healthcheck read back null — set on the service instance instead (§5.26) |
+| Coddy | `coddy` | coddy (`alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. Telegram gateway absent: the published image is built without that tag (§5.27) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
