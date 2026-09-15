@@ -1112,16 +1112,39 @@ git — nothing pointing at the symlink swap, and the container exited 128 three
 actual mistake. Fix is one line, `cd /` at the top. **Generalises: before an entrypoint replaces,
 renames or unmounts a directory, step out of it — an inherited `WORKDIR` counts as being in it.**
 
-**A browser-registration first run is a land grab on a public domain.** CloudCLI is single-user:
-the first `POST /api/auth/register` creates the account and every later one returns **403**. Bound
-to `127.0.0.1` behind a Compose file that is a fine design. On a Railway domain it means the first
-person to reach the URL — a scanner, anyone the link is forwarded to — owns a machine holding the
-deployer's Anthropic session. The template therefore **creates the account from inside the
-container**, in a background loop that waits for `/api/auth/status` to answer and then registers
-`admin` with a `${{secret(24)}}` password, before the service is reachable. The body is piped into
+**A browser-registration first run is a land grab on a public domain — and the obvious fix loses a
+race.** CloudCLI is single-user: the first `POST /api/auth/register` creates the account and every
+later one returns **403**. Bound to `127.0.0.1` behind a Compose file that is a fine design. On a
+Railway domain it means the first person to reach the URL — a scanner, anyone the link is forwarded
+to — owns a machine holding the deployer's Anthropic session. So the template has to claim the
+account itself.
+
+The first implementation did that in a background loop started by the entrypoint: wait for
+`/api/auth/status` to answer, then register. It worked locally, every time. **On Railway it lost.**
+The first probe of the live deployment found `needsSetup: true`, and a deliberate `intruder`
+registration against the public domain returned **200** — the verification created the very account
+it was checking for. Two reasons, both structural: Railway's healthcheck passes the moment the
+server listens, which is also the moment the edge starts routing, so "reachable" and "registerable"
+begin together; and the deployment logs showed the background job never ran at all on Railway (no
+`[railway] Created…` line, no warning either), so it did not survive the `exec /init` handoff to
+s6-overlay the way it did under a plain `docker run`.
+
+The shipped design removes the race instead of narrowing it: the entrypoint starts **its own
+loopback-only instance** of the server on a throwaway port, registers `admin` with a
+`${{secret(24)}}` password against that, stops it, and only then hands off to upstream's entrypoint
+and s6. The public server therefore cannot exist in an unclaimed state, and the phase **fails
+closed** — if the setup instance will not start or will not register, the boot aborts rather than
+exposing an open one. Proven by polling the public port from the first moment it answers: its first
+response is already `needsSetup:false`, and registration is 403. The body is piped into
 `curl --data-binary @-` rather than passed as an argument, so the password never enters the process
-table. **Generalises: whenever an upstream's onboarding is "open the page and claim it", the
-template must claim it first.**
+table.
+
+**Generalises twice over. Whenever an upstream's onboarding is "open the page and claim it", the
+template must claim it first — and "first" has to mean before the listener exists, not merely
+before a human gets there. A background task racing your own service is not a security control.**
+It also generalises to verification: probing with a request that *would create state* is how this
+was caught, which is worth doing deliberately — a read-only probe would have reported
+`needsSetup: true` and left it ambiguous.
 
 **An API-key variable that locks out the browser.** CloudCLI honours `API_KEY`, and it is tempting
 to offer it as a second lock. It is applied as `app.use('/api', validateApiKey)` — *every* `/api`
@@ -1296,7 +1319,7 @@ Repos / CLI
 - Sub-agent reports can get lost; have them write files.
 - **Before `git add` in a new folder, `git rev-parse --show-toplevel` must print that folder.** A parent directory that is itself a git repo swallows the add: `git init` guarded by `--is-inside-work-tree` did not run, and `git add -A` pushed 455 workspace files (agent config, memory notes, other projects) to a brand-new public repo. `git init` unconditionally in the new directory; prefer explicit paths over `-A` in directories you did not create this session.
 - **An inherited `WORKDIR` counts as being in the directory you are about to replace.** An entrypoint that swapped `/workspace` for a symlink deleted its own cwd; the boot then failed with `getcwd: cannot access parent directories` from every later process and exited 128 three minutes later, nothing pointing at the cause. `cd /` first.
-- **When an upstream's first run is "open the page and create an account", the template must create it first.** Single-user apps hand ownership to whoever reaches the URL first, and a public domain is reached by scanners. Register from inside the container before the service is exposed, piping the body into `curl --data-binary @-` so the password never enters the process table.
+- **When an upstream's first run is "open the page and create an account", the template must create it first — before the public listener exists.** Single-user apps hand ownership to whoever reaches the URL first. A background job that registers while the real server starts is not enough: Railway's healthcheck passes the moment the server listens, which is the moment the edge starts routing, and on Railway that job did not survive the `exec /init` handoff to s6-overlay at all. Start a loopback-only instance during the entrypoint, register against it, stop it, then start the real one — and fail closed if that does not work. Pipe the body into `curl --data-binary @-` so the password never enters the process table.
 - **An app that validates its own state directory dictates the mount point.** HolyClaude refuses to start when `~/.claude` is a symlink, so the volume mounts *there* and the workspace symlinks into it — the reverse of the usual `/data` layout. Read the upstream preflight before choosing where the volume goes.
 - A force-push does **not** remove a leaked commit from GitHub: it stays fetchable by hash (`repos/<r>/commits/<sha>`, full tree) and the repo activity feed lists the old hash next to the new one. Make the repo private at once, then delete and recreate it (`gh auth refresh -s delete_repo`, `gh repo delete`, `gh repo create`, push) and verify the old hashes return 404.
 - cognee `remember` may hang after finishing server-side; retry is a 1-second dedup.
@@ -1336,7 +1359,7 @@ Docs
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.5-rc.1 on `node:22`, Caddy 2.11 binary in the same container, mise, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
-| HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | **Zero required fields**; `CLOUDCLI_PASSWORD=${{secret(24)}}`. Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account from inside the container before the public URL is reachable, since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
+| HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.1` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | **Zero required fields**; `CLOUDCLI_PASSWORD=${{secret(24)}}`. Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
