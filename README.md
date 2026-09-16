@@ -37,6 +37,7 @@ Template repositories built with it:
 | Scrumboy | https://railway.com/deploy/scrumboy-1 | [scrumboy_railway_template](https://github.com/RockinPaul/scrumboy_railway_template) |
 | Trivy Server | https://railway.com/deploy/trivy-server | [trivy_railway_template](https://github.com/RockinPaul/trivy_railway_template) |
 | QwenPaw | https://railway.com/deploy/qwenpaw-1 | [qwenpaw_railway_template](https://github.com/RockinPaul/qwenpaw_railway_template) |
+| ReMe | https://railway.com/deploy/reme | [reme_railway_template](https://github.com/RockinPaul/reme_railway_template) |
 
 ## Weekly upstream update assessment
 

@@ -754,3 +754,25 @@ templates:
           - "website/public/docs/security.en.md"
           - "website/public/docs/models.en.md"
           - "LICENSE"
+  - name: ReMe
+    template_repo: RockinPaul/reme_railway_template
+    deploy_url: https://railway.com/deploy/reme
+    notes: "First template with NO upstream image (ReMe ships only a pip package) and NO upstream authentication - upstream states the service layer has none, CORS allows any origin, jobs may write/move/delete files, and instructs users to place it behind an authenticated reverse proxy rather than exposing it directly. So Caddy holds a generated bcrypt credential as the only public listener while ReMe keeps its default 127.0.0.1 bind and service.host=0.0.0.0 is never set. All 149 resolved packages are hash-pinned in requirements.lock because without an upstream image a rebuild is a fresh resolution; regenerate on linux/amd64. reme-ai declares reme_studio with no version constraint, so the lock is what stops the UI drifting. Apache-2.0. See guide §5.32."
+    upstreams:
+      - name: reme-ai package
+        repo: agentscope-ai/ReMe
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+\.\d+$'
+        pins:
+          - file: requirements.in
+            pattern: '^reme-ai\[core\]==(?P<version>[\w.]+)'
+        relevant_paths:
+          - "reme/constants.py"
+          - "reme/config/default.yaml"
+          - "reme/components/service/http_service.py"
+          - "reme/reme.py"
+          - "docs/en/services.md"
+          - "example.env"
+          - "pyproject.toml"
+          - "LICENSE"

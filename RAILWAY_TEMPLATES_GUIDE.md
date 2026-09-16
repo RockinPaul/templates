@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-nine of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy**, **Trivy Server** and **QwenPaw**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing thirty of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy**, **Trivy Server**, **QwenPaw** and **ReMe**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1681,6 +1681,97 @@ connects the branch. Finally, publishing
 collided with a stale incumbent — a `qwenpaw` template created 2026-04-13 pinning `v1.1.0` with no
 healthcheck, `ON_FAILURE`, one volume at `/app/working` and no auth variables at all — so this one
 published as `qwenpaw-1`.
+
+### 5.32 The first template with no upstream image and no upstream auth (ReMe)
+
+[ReMe](https://github.com/agentscope-ai/ReMe) (Apache-2.0, ~3.5k stars, an ACL 2026 paper behind it)
+is a self-evolving memory workspace for agents: conversations and documents become ordinary Markdown
+notes with frontmatter and wikilinks, retrieved by BM25, wikilink expansion and optional embeddings.
+One Python process serves the HTTP API, a streamable-HTTP MCP endpoint at `/mcp`, and the ReMe Studio
+web UI. Everything durable is Markdown on one volume.
+
+It breaks two assumptions the previous thirty templates were all built on.
+
+**There is no upstream image.** No Dockerfile, no compose file, no mention of Docker anywhere in the
+docs — ReMe ships as a pip package for local use. Every other template in this portfolio pins an
+artefact that upstream built and tested; here `pip install` is a *resolution*, so the same pin would
+produce a different image next month. The answer is a hash-pinned lockfile: `uv pip compile
+requirements.in --generate-hashes` produced 149 packages, and the image installs with
+`pip --require-hashes`, which refuses anything whose artefact does not match. Generate the lock **on
+the deploy architecture** — `docker run --platform linux/amd64` — for the same reason §5.31 exists.
+**Generalises: when the upstream artefact is a resolution rather than a build, the lockfile is the
+artefact.**
+
+**There is no upstream authentication to make mandatory.** This is the sharper break. In §5.27,
+§5.30 and §5.31 upstream shipped a credential mechanism that was merely off or optional, and the
+template's job was to make it non-optional. ReMe has none at all — a code search for `api_key`,
+`Authorization` or `bearer` under `reme/` returns nothing, and upstream says so directly:
+
+> ReMe is local-first: the default binds to `127.0.0.1`; HTTP CORS allows any origin; Jobs may write,
+> move, or delete files; the service layer has no general-purpose user authentication.
+>
+> Remote access must be enabled explicitly with `reme start service.host=0.0.0.0`. Do not expose the
+> service directly to the public internet. Place it on a controlled network or behind an
+> authenticated TLS reverse proxy...
+
+Read carelessly that is a disqualifier. Read properly it is a specification: upstream forbids
+exposing it *directly* and names the supported alternative. Railway terminates TLS at the edge, so
+the template supplies the other half — Caddy holds a generated bcrypt credential and is the only
+public listener, while **ReMe keeps its own default `127.0.0.1` bind and `service.host=0.0.0.0` is
+never set**, so no configuration mistake can publish the unauthenticated API. That is the same
+reasoning that settled the Trivy token question in §5.30: check whether upstream's warning is a
+prohibition or a prescription before treating it as either.
+
+Note this is the exact inverse of §5.31's hazard. There, an in-container proxy was fatal because
+QwenPaw trusts loopback peers; here the proxy is mandatory because ReMe trusts *everyone*. **The
+question is never "is a relay allowed", it is "what does this application infer from the peer
+address".**
+
+Three details that made the proxy correct rather than merely present. `/healthz` is answered by Caddy
+itself, because Railway's healthcheck carries no credentials and every ReMe route is either a job
+endpoint or the Studio SPA — pointing the check at one would mean punching a hole in the gate.
+`flush_interval -1` disables response buffering, which the streamable HTTP MCP endpoint and ReMe's
+SSE jobs need. And the password is hashed by piping it into `caddy hash-password` on **stdin** rather
+than `--plaintext`, so it never enters the container's argv — the lesson §5.27 borrowed from Coddy's
+own docs.
+
+**Two measured bugs in my own wrapper, both invisible from the deploy status.** First, `reme version`
+is not a build-time smoke test: every `reme <action>` is a *client* that looks for a running service,
+so it failed the image build with `httpx.ConnectError` and proved nothing. It was replaced with an
+import check. Second, the entrypoint supervises two processes, and without a signal trap the shell
+sat in `wait` ignoring SIGTERM — every stop ended in SIGKILL after the full timeout, measured
+`exit=137`, with the index mid-write. With the trap, shutdown is `exit=0` in under three seconds,
+which is also why the policy is `ALWAYS`.
+
+**And one bug in upstream's own README.** It states that "basic file operations, BM25 search,
+wikilink traversal ... can run without LLM credentials". Locally true; in a container false. ReMe
+builds its LLM client *while the service starts* — AgentScope initialises models eagerly, and
+upstream has already patched around that once in v0.4.1.8 — so an empty `LLM_API_KEY` aborts the boot
+with `openai.OpenAIError: Missing credentials` before anything is served. The entrypoint supplies a
+placeholder when no key is configured, which makes the keyless half genuinely work: verified BM25
+search returning a line-level hit and a write landing on the volume with no key present anywhere.
+Model-backed jobs then fail at call time with the provider's auth error, which is the honest outcome.
+
+**Indexing is asynchronous, which looks like a bug in a smoke test.** A write through the edge
+returned `Wrote /data/workspace/...` and the very next search returned
+`counts: {vector: 0, keyword: 0, returned: 0}`. Nothing was wrong: a background `index_update_loop`
+job watches the workspace directories, so the note is searchable a moment later — the next poll
+returned it at score 1.1507. Worth stating in the listing, and worth remembering before "verifying"
+a write-then-read in one breath.
+
+**Optional variables with an empty default are not provisioned at all.** `LLM_API_KEY` and
+`LLM_BASE_URL` were patched in as `isOptional: true` with `defaultValue: ""`, and the one-click
+deployment simply does not create them — the user adds them by hand when they want the model-backed
+features. That is reasonable behaviour, but it means the deploy form cannot be used to hint at an
+optional setting; the listing has to.
+
+Smaller findings. Caddy is Go, so `:8080` is a dual-stack socket and Railway's IPv4 edge reaches it —
+`/proc/net/tcp6` holds `[::]:8080` while ReMe sits alone on `127.0.0.1:2333` in `/proc/net/tcp`.
+ReMe's CORS is `*`, but its own code sets `allow_credentials` to false whenever the origin list is
+`*`, so a cross-origin page cannot read the API even before the proxy rejects it. Idle memory is
+about 265 MB; the image is 1.44 GB, mostly faiss, polars and AgentScope. And `reme-ai` declares
+`reme_studio` with **no version constraint**, so without the lock the UI would drift independently of
+the pin.
 
 ---
 
