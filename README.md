@@ -2,7 +2,7 @@
 
 Notes and guides for building one-click **Railway marketplace templates** that wrap upstream open-source projects.
 
-- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-seven templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents, HolyClaude Workstation, Octop, Coddy, PenguinHarness, Scrumboy).
+- [RAILWAY_TEMPLATES_GUIDE.md](RAILWAY_TEMPLATES_GUIDE.md): the complete playbook, from investigating an upstream project to a published and verified template, with the platform facts, component patterns and the gotcha catalogue collected while building twenty-eight templates (cognee, Multica, Fabric, LongMemory, projectmem, gortex, Observal, WeKnora, EverOS, Notesnook, Pipecat, OpenPencil, Persistent mise Workspace, Apache HertzBeat, Laminar, OpenKnowledge, tlbx, codeg, Orca, DSH + LongMemory, Mirage Daemon, Yao Agents, HolyClaude Workstation, Octop, Coddy, PenguinHarness, Scrumboy, Trivy Server).
 
 Template repositories built with it:
 
@@ -35,6 +35,7 @@ Template repositories built with it:
 | Coddy | https://railway.com/deploy/coddy | [coddy_railway_template](https://github.com/RockinPaul/coddy_railway_template) |
 | PenguinHarness | https://railway.com/deploy/penguinharness | [penguin_railway_template](https://github.com/RockinPaul/penguin_railway_template) |
 | Scrumboy | https://railway.com/deploy/scrumboy-1 | [scrumboy_railway_template](https://github.com/RockinPaul/scrumboy_railway_template) |
+| Trivy Server | https://railway.com/deploy/trivy-server | [trivy_railway_template](https://github.com/RockinPaul/trivy_railway_template) |
 
 ## Weekly upstream update assessment
 

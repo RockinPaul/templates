@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-seven of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness** and **Scrumboy**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-eight of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy** and **Trivy Server**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1502,6 +1502,68 @@ deployment made from it has no owner password, which means it hands ownership to
 URL first, exactly the failure this template exists to prevent. Differentiation is worth stating in
 the README rather than leaving a visitor to guess why there are two.
 
+### 5.30 A template with no web page, and a token that upstream already told you to set (Trivy Server)
+
+[Trivy](https://github.com/aquasecurity/trivy) (Apache-2.0, ~38k stars) is usually met as a CLI.
+It also has a **client/server mode** in which the server holds the vulnerability database and
+clients send analysis results rather than artifacts, and that mode is a genuine hosted product: one
+server instead of every CI job downloading **1.3 GB** of vulnerability data.
+
+**This is the portfolio's first template with no browser surface at all, and that was nearly a
+reason to reject it.** `GET /` returns a bare `404 page not found`; only `/healthz` and `/version`
+answer. The question "shouldn't a template have a web client?" is a fair one and it was worth four
+candidates' worth of searching before concluding that no companion exists:
+`fatihtokus/scan2html` is a **CLI plugin** that writes an HTML file (no Dockerfile, no listener);
+`dbsystel/trivy-vulnerability-explorer` is a client-side SPA that loads Trivy's **JSON output** and
+has zero references to `--server`; `raoulx24/trivy-operator-dashboard` and `locustbaby/trivy-ui`
+both read **Trivy Operator CRDs from a Kubernetes API**. **Generalises: a dashboard for a Kubernetes
+operator is never a template candidate — its data source is the cluster, not its own storage; look
+for a Helm chart carrying ClusterRole and a Kubernetes client library.**
+
+The template shipped anyway, on the precedent that this portfolio already publishes endpoint-shaped
+templates (the MCP servers in §5.5). The listing leads with the client command, says plainly that
+there is no web interface, and points at `/version` as the browser-visible freshness check.
+**Decide "headless is acceptable" once, as a portfolio policy, rather than per template.**
+
+**The token is mandatory, and the interesting part is that this is not a house-style override.**
+The first instinct was to frame it as "stricter than upstream", the way §5.27 framed Coddy. Reading
+upstream's own words changed the framing entirely:
+
+> The server listens on `localhost:4954` by default. When exposing it to other hosts, configure
+> `--token` and restrict network access to trusted clients.
+
+The optional token is paired with a **loopback default bind**. It is optional because nothing can
+reach the server. A template's whole purpose is to expose it, which puts us in upstream's own
+"exposing it to other hosts" branch, where upstream's instruction is a token. Of the three
+protections named there we can satisfy two — configure a token, terminate TLS in front — and the
+third, restricting network access, is unavailable on a public edge, which makes the token *the only*
+access control rather than one of several. **When upstream's default looks lax, check what it is
+paired with before calling your version stricter; you may simply be in a different branch of their
+own guidance.**
+
+The stakes are higher than an unauthorised lookup, again in upstream's words: clients "can write and
+delete shared cache entries, affecting scans performed by other clients". An open server lets a
+stranger poison the cache until a deployer's pipeline calls a vulnerable image clean. Upstream's
+check is `token != "" && token != header`, so an empty token is not a weak password but **no gate at
+all** — which is why the wrapper gives the variable no default and exits without one.
+
+Mechanically it is the thinnest wrapper here. Upstream's image is used unmodified: a static Go
+binary, all state in one cache directory, **every setting available as a `TRIVY_*` environment
+variable**. That last point is what keeps the token out of `ps` — `TRIVY_TOKEN`, `TRIVY_LISTEN` and
+`TRIVY_CACHE_DIR` replace every flag, and the process table shows only `trivy server`.
+
+Measured facts worth carrying. **The vulnerability database downloads *before* the listener opens**
+(`operation.DownloadDB` precedes `ListenAndServe` in `pkg/commands/server/run.go`), so the health
+check timeout is 600 s even though the measurement was 8 s cold and 3 s warm — the download is on
+the deployer's network, not yours. **Trivy takes an exclusive lock on its cache**: a second server
+on the same volume exits with `cache may be in use by another process`, so the service must stay at
+one replica. That was found by accident when two rehearsal containers shared a volume, and the
+failure looked like a bind-address problem until the containers were run one at a time — **when a
+probe fails, re-run it in isolation before believing what it seems to say about the thing you were
+testing.** All three of `0.0.0.0:PORT`, `:PORT` and `[::]:PORT` produce the *same* single dual-stack
+socket, so the bind form is a non-issue here; `0.0.0.0` is used because it is upstream's documented
+form. A clean SIGTERM exits 0, so `ALWAYS`.
+
 ---
 
 ## 7. Gotcha catalogue (quick reference)
@@ -1519,6 +1581,10 @@ Networking / binding
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
 
 Build / verification discipline
+- **When upstream's default looks lax, check what it is paired with before calling your version stricter.** Trivy's token is optional *because* its default bind is loopback; upstream's own instruction for an exposed server is to configure one. Making it mandatory on a public domain is upstream's guidance, not a house override — and only two of their three named protections (token, TLS in front, network restriction) are available on a PaaS, which makes the token the sole control (§5.30).
+- **A dashboard for a Kubernetes operator is never a template candidate.** Its data source is the cluster API, not its own storage, so it deploys cleanly and displays nothing. Tells: a Helm chart carrying ClusterRole/ClusterRoleBinding, a Kubernetes client library, reads of custom resources (§5.30).
+- **When a probe fails, re-run it in isolation before believing what it says.** Two rehearsal containers sharing one volume made Trivy's exclusive cache lock look like a bind-address failure; run one at a time and the "finding" disappears — and the real finding (the lock) appears (§5.30).
+- **Decide "headless is acceptable" as a portfolio policy, once.** Trivy server has no browser surface at all (`GET /` is a bare 404), and four candidate companion UIs all failed. It shipped on the precedent that endpoint-shaped templates already exist (§5.5), with the listing leading on the client command (§5.30).
 - **When a template closes a race, make the race part of the rehearsal.** Scrumboy's owner account is claimed by whoever posts to the bootstrap endpoint first, so the build ran the attack on purpose: 400 bootstrap attempts against the published port from the instant the container started, scoring 82 connection-refused, 318 `409`, and zero successes. A design that is believed to be race-free and one that is measured to be are different things (§5.29).
 - **Check whether the marketplace already carries a template for your upstream before naming yours.** Publishing slugs the name, so an incumbent pushes you to `<name>-1`. Read the incumbent's `serializedConfig`: the one holding `scrumboy` declares no variables, healthcheck, domain or deploy block, which is worth saying in the README rather than leaving a visitor to guess why there are two (§5.29).
 - **An app can be open *before* its first account exists, not just after.** Scrumboy answers anonymous `GET` **and `POST`** until bootstrap completes, and 401s both afterwards. Probe the pre-bootstrap state with a write, not a read (§5.29).
@@ -1674,6 +1740,7 @@ Docs
 | Coddy | `coddy` | coddy (`alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. Telegram gateway absent: the published image is built without that tag (§5.27) |
 | PenguinHarness | `penguinharness` | penguin (`hiyouga/penguinharness:0.2.11` upstream multi-arch image used as-is, state on a 5 GB volume at `/data`) — **1 service** | `PENGUIN_SEED_ADMIN_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. Upstream's own entrypoint already chowned only the top level of the data root and `exec setpriv`-ed in place, so the wrapper adds environment plus one guard and nothing else. Authentication is **on** by default — the hosted problem was the delivery channel: with no password configured the server prints a one-time claim link to the container log. Seeding happens only while no user exists, and the claim link returns while the password is still flagged initial, so rotating the variable leaves a way in rather than a lockout (all four states measured). Node binds dual-stack on `::` → **no socat**; `ALWAYS` because a clean SIGTERM exits 0 (§5.28) |
 | Scrumboy | `scrumboy-1` | scrumboy (`ghcr.io/markrai/scrumboy:3.34.0` upstream multi-arch image used as-is + curl/tini, **44 MB**, SQLite on a 5 GB volume at `/data`) — **1 service** | `SCRUMBOY_OWNER_PASSWORD=${{secret(24)}}` plus prefilled `PORT=8080`, `SCRUMBOY_OWNER_EMAIL` and `SCRUMBOY_PUBLIC_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (the reference survives generation; the literals did not). The Owner is whoever posts to `/api/auth/bootstrap` first and the API serves anonymous **reads and writes** until then, so the entrypoint claims it against a `127.0.0.1` listener before the public port opens, idempotent on 201/409 and fail-closed otherwise; **the race was run as a test** — 400 attacker attempts, zero wins. Password passed on stdin, absent from `ps` and logs. Encryption key is base64 of 32 bytes so `${{secret}}` cannot express it: generated on first boot onto the volume. Third no-socat Go service; `ALWAYS` because SIGTERM exits 0. Published as `scrumboy-1` because a third-party `scrumboy` with no variables or healthcheck already existed (§5.29) |
+| Trivy Server | `trivy-server` | trivy (`ghcr.io/aquasecurity/trivy:0.74.0` upstream multi-arch image used as-is, 179 MB, 1.3 GB vulnerability DB on a 5 GB volume at `/data`) — **1 service** | `TRIVY_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. **No browser surface at all** — `GET /` is a bare 404; the listing leads with the client command and points at `/version`. The token is mandatory because upstream's optional token is paired with a loopback default bind and their guidance for an exposed server is to set one; an empty token disables auth entirely (`token != "" && token != header`), and an open server lets a stranger write and delete shared cache entries other clients' scans depend on. Every setting arrives as a `TRIVY_*` env var so the token never enters `ps`. DB downloads **before** the listener opens (8 s cold, 3 s warm, 600 s timeout); exclusive cache lock so **single replica only**; `ALWAYS` because SIGTERM exits 0 (§5.30) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

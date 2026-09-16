@@ -710,3 +710,24 @@ templates:
           - "docs/recovery.md"
           - "API.md"
           - "LICENSE"
+  - name: Trivy Server
+    template_repo: RockinPaul/trivy_railway_template
+    deploy_url: https://railway.com/deploy/trivy-server
+    notes: Thin wrapper over upstream's own multi-arch image, used unmodified. Adds Railway environment plus a guard that refuses to start without TRIVY_TOKEN, because an empty token disables authentication entirely and upstream's own guidance for an exposed server is to configure one. No browser surface; the listing leads with the client command. Image and git tags are both plain semver with a v prefix on the git side. Apache-2.0. See guide \u00a75.30.
+    upstreams:
+      - name: trivy image
+        repo: aquasecurity/trivy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+TRIVY_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "pkg/commands/server/run.go"
+          - "pkg/rpc/server/listen.go"
+          - "pkg/rpc/server/server.go"
+          - "docs/guide/references/modes/client-server.md"
+          - "docs/guide/references/configuration/cli/trivy_server.md"
+          - "Dockerfile"
+          - "LICENSE"
