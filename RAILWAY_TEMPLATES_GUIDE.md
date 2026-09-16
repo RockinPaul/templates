@@ -950,6 +950,45 @@ from the §5.17 template so the agent has memory across sessions. Zero required 
   superseded an in-flight build); `serviceInstanceUpdate` of `rootDirectory` does too; and
   `caddy hash-password` needs a newline-terminated line on stdin or fails with `EOF`.
 
+
+**The first login was unusable, and fixing it put an auth bypass one directive apart.**
+Revisited 2026-09-16, after the reference deployment made the problem obvious: signing in meant
+opening the deploy logs, finding the `dsh web:` line and hand-editing its loopback URL into the
+public domain. Nobody who clicks Deploy will do that. DSH's launch token is `randomBytes(32)` minted
+per process — it cannot be preset by flag, environment or config, and the persisted half of the
+scheme is a signing secret with no public API — so a permanent credential has to come from the
+template. The fix: `DSH_GATE_PASSWORD` stops being optional (`${{secret(24)}}` in the template), and
+the gateway redeems the token on the visitor's behalf, so DSH's ordinary `/?token=` exchange runs
+behind the gate and the deployer only ever sees a browser password prompt. Nothing of DSH's auth is
+reimplemented: the cookie is still minted by DSH with its own secret.
+
+- **CADDY'S DIRECTIVE ORDER PUTS `redir` AHEAD OF `basic_auth`, AND THAT IS AN AUTH BYPASS.** Inside
+  a `handle` block the written order is discarded, so `import gate.caddy` followed by the sign-in
+  redirect executes redirect-first: an unauthenticated `GET /` is answered **302 with the live
+  token** while `/api`, `/?token=`, and `/` with a cookie all still answer 401. Every probe that is
+  not exactly "the index, anonymous, no token" says the gate works. `route` keeps the written order
+  and fixes it; measured both ways on 2.11.2 and pinned by `test-gateway.sh` in the template repo.
+  Generalises past Caddy: **when a config language reorders what you wrote, an auth check is not
+  "first" because it is written first** — assert the negative case on the exact path the other
+  directive matches.
+- **Couple the convenience to the credential.** Auto sign-in hands a session to whoever reaches the
+  index, so it is armed only when a gate password exists; clearing the password disables both and
+  falls back to the printed token. A template that let the two drift apart would publish the harness
+  the moment someone emptied a variable.
+- **A stale listener inverted three consecutive test runs.** `caddy start` detaches with a rewritten
+  argv, so `pkill -f "$PWD/caddy"` matched nothing and the old config kept answering on the port
+  while the new one failed to bind silently. Two conclusions were drawn and one comment was written
+  from those readings before a unique marker in the redirect target exposed it. **Kill by the bare
+  process name, assert the port is free before binding, and put a run-unique value in the response
+  when a test can be answered by the wrong process.**
+- **Reading a child's output costs you `exec`.** The token has to be parsed out of DSH's stdout, so
+  the entrypoint can no longer `exec` it: it now runs DSH against a FIFO, tees the stream through to
+  the deploy log unchanged, waits for the token with a bounded loop, then starts Caddy. That means
+  carrying DSH's exit status out by hand and trapping TERM to reach both children, neither of which
+  `exec` had needed. The wait is safe because the line lands ~2.4 s after start against a 300 s
+  health check — but it is bounded anyway, and a miss degrades to the old token flow rather than
+  hanging the boot.
+
 ---
 
 ### 5.23 A daemon that exits when idle, binds one address family, and fences Host before health (Mirage)
@@ -1925,6 +1964,17 @@ Upstream also publishes `-previewN` tags; `tag_pattern: '^v\d+\.\d+\.\d+$'` excl
 ---
 
 ## 7. Gotcha catalogue (quick reference)
+
+Auth in front of a proxy
+- Caddy sorts directives inside `handle`, and `redir` sorts BEFORE `basic_auth`. A sign-in redirect
+  written after the gate runs before it, so an anonymous request to the one path the redirect
+  matches is answered 302 while every other path answers 401 — the gate looks like it works. Use
+  `route`, which keeps the written order, and test the anonymous case on that exact path (§5.22).
+- Generally: when a config language reorders what you wrote, an auth check is not "first" because
+  it is written first. Assert the negative case, not just the positive one.
+- `caddy start` detaches with a rewritten argv, so `pkill -f "$PWD/caddy"` misses it and a stale
+  listener keeps the port while the new instance fails to bind. Kill by bare name, assert the port
+  is free, and put a run-unique value in the response so the wrong process cannot fake a pass.
 
 Networking / binding
 - uvicorn `--host ::` is IPv6-only; use `--host ''`.

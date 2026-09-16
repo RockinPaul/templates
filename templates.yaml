@@ -204,7 +204,7 @@ templates:
   - name: DSH + LongMemory
     template_repo: RockinPaul/dsh_railway_template
     deploy_url: https://railway.com/deploy/dsh-longmemory
-    notes: Upstream ships prereleases only (alpha/rc every few days); the pin is an npm version whose git tag is dsh-v<version>. LongMemory is pinned in its own template repo. See guide §5.22.
+    notes: "Upstream ships prereleases only (alpha/rc every few days); the pin is an npm version whose git tag is dsh-v<version>. LongMemory is pinned in its own template repo. Sign-in is a generated DSH_GATE_PASSWORD, not the launch token: DSH mints that token with randomBytes() per process and it cannot be preset, so the gateway redeems it behind the edge gate and the deployer only sees a browser password prompt. The gate and auto sign-in are interlocked — clearing the password disables both. The gate and the redirect must live in a Caddy `route`, not a `handle`, or `redir` sorts ahead of `basic_auth` and an anonymous GET / is answered 302 with the live token; test-gateway.sh pins that case. See guide §5.22."
     upstreams:
       - name: dsh (npm package @deepseek-ai/dsh)
         repo: deepseek-ai/deepseek-harness
