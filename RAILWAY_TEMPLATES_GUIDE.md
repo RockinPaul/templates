@@ -1618,6 +1618,25 @@ entirely. Measured by replacing the container with a different password on the s
 original password still returned **200** and the new one **401**. The listing says so, because the
 obvious way to rotate a credential — edit the variable, redeploy — does nothing here.
 
+**A default you can only pick once, and it is not English.** `AgentsConfig.language` defaults to
+`"zh"`, there is no environment variable for it and `qwenpaw init` has no `--language` flag — the
+only flags are `--force`, `--defaults` and `--accept-security`. That setting decides which persona
+files (`AGENTS.md`, `SOUL.md`, `PROFILE.md` and the rest of `system_prompt_files`) get copied into
+the default workspace, so the template as first published handed every deployment a Chinese-speaking
+agent. Worse, it is not correctable afterwards: the branch that re-copies on a language change is
+`elif installed_language != current_language or force`, which the non-interactive path never reaches,
+because `--defaults` takes the earlier branch and calls `copy_md_files(..., skip_existing=True)`.
+Once the files are on the volume they stay.
+
+The fix is to seed `config.json` with the language *before the first init*, which is the one moment
+the choice is free, and to run the initialiser from the wrapper rather than letting upstream's
+entrypoint do it — upstream only runs init when `config.json` is absent, and the seed has just
+created it. Verified end to end: `en` and `zh` each produce the matching `AGENTS.md`, an unrecognised
+value fails closed rather than leaving the agent with no persona, and a second boot on a populated
+volume does not re-seed. **Generalises: when an upstream setting is consumed once at initialisation,
+a template variable for it is only meaningful if the wrapper controls the moment initialisation
+happens.**
+
 **Three state directories, one volume.** `QWENPAW_WORKING_DIR`, `QWENPAW_SECRET_DIR` and
 `QWENPAW_BACKUP_DIR` all default under `/app`; all three are plain environment variables, so they
 consolidate onto `/data`. Upstream's entrypoint runs `qwenpaw init --defaults --accept-security` when

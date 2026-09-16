@@ -734,7 +734,7 @@ templates:
   - name: QwenPaw
     template_repo: RockinPaul/qwenpaw_railway_template
     deploy_url: https://railway.com/deploy/qwenpaw-1
-    notes: "Thin wrapper over upstream's own multi-arch image, used unmodified - only env vars and an entrypoint. Requires a login upstream leaves optional, and deliberately runs NO relay, because QwenPaw skips auth for 127.0.0.1/::1 and an in-container proxy would silently disable the login (measured 200 via relay vs 401 direct). Rebinding to :: was tried and reverted, since Python sets IPV6_V6ONLY and Railway's public proxy is IPv4. Auto-registration variables are write-once. Apache-2.0. See guide §5.31."
+    notes: "Thin wrapper over upstream's own multi-arch image, used unmodified - only env vars and an entrypoint. Requires a login upstream leaves optional, and deliberately runs NO relay, because QwenPaw skips auth for 127.0.0.1/::1 and an in-container proxy would silently disable the login (measured 200 via relay vs 401 direct). Rebinding to :: was tried and reverted, since Python sets IPV6_V6ONLY and Railway's public proxy is IPv4. Auto-registration variables are write-once, and so is the agent language: upstream defaults to zh with no env var and no init flag, and its non-interactive init copies persona files with skip_existing=True, so the wrapper seeds config.json and runs init itself before handing off (QWENPAW_AGENT_LANGUAGE, default en). Apache-2.0. See guide §5.31."
     upstreams:
       - name: qwenpaw image
         repo: agentscope-ai/QwenPaw
