@@ -776,3 +776,22 @@ templates:
           - "example.env"
           - "pyproject.toml"
           - "LICENSE"
+  - name: PaddleOCR
+    template_repo: RockinPaul/paddleocr_railway_template
+    deploy_url: https://railway.com/deploy/paddleocr
+    notes: "Second template with no upstream image (PaddleOCR ships pip packages only) and no upstream authentication, so Caddy holds a generated credential and paddlex --serve is pinned to 127.0.0.1 rather than its 0.0.0.0 default. FIRST template with NO VOLUME: stateless, and the pipeline's 5 models (177 MB) are baked into the image because PaddleX downloads them when the SERVER starts, not lazily. The first inference then costs 98s versus ~4s warm, so the entrypoint runs a throwaway inference before the proxy opens. PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=False is REQUIRED: oneDNN breaks every request on real x86 with PaddlePaddle 3.3.1, and a local emulated rehearsal cannot reproduce it. Apache-2.0. See guide §5.33."
+    upstreams:
+      - name: paddleocr package
+        repo: PaddlePaddle/PaddleOCR
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: requirements.in
+            pattern: '^paddleocr==(?P<version>[\w.]+)'
+        relevant_paths:
+          - "docs/version3.x/inference_deployment/serving/serving.en.md"
+          - "docs/version3.x/pipeline_usage/OCR.en.md"
+          - "deploy/docker"
+          - "pyproject.toml"
+          - "LICENSE"

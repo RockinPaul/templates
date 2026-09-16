@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing thirty of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy**, **Trivy Server**, **QwenPaw** and **ReMe**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing thirty-one of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy**, **Trivy Server**, **QwenPaw**, **ReMe** and **PaddleOCR**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1772,6 +1772,82 @@ ReMe's CORS is `*`, but its own code sets `allow_credentials` to false whenever 
 about 265 MB; the image is 1.44 GB, mostly faiss, polars and AgentScope. And `reme-ai` declares
 `reme_studio` with **no version constraint**, so without the lock the UI would drift independently of
 the pin.
+
+### 5.33 Two cold starts, and paying for both before the first request (PaddleOCR)
+
+[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0, ~90k stars) turns images and PDFs
+into structured text in 100+ languages. PaddleOCR 3.x delegates serving to PaddleX:
+`paddlex --serve --pipeline OCR` runs a FastAPI application on `0.0.0.0:8080`, with `--host` and
+`--port` both configurable. After §5.31 the bind form is the first thing to check, and here there was
+simply nothing to fix.
+
+This is the second template with no upstream image (§5.32 was the first) — `deploy/docker/` holds
+only the legacy 2.x hubserving and `deploy/paddleocr_vl_docker/` is the GPU/vLLM vision-language
+pipeline — so the same answer applies: a hash-pinned `requirements.lock`, 98 packages, compiled under
+`--platform linux/amd64`. It is also the second with no upstream authentication, so Caddy holds a
+generated credential and `paddlex --serve` is pinned to `127.0.0.1`, overriding PaddleX's own
+`0.0.0.0` default so the unauthenticated API has no public interface at all.
+
+**The finding worth keeping is that this service has two distinct cold starts, and both are
+invisible until you measure them.**
+
+The first is the obvious one, except that it happens earlier than expected. PaddleX builds the
+pipeline when the **server starts**, not lazily on the first request: a cold container logged
+`Using official model (PP-OCRv6_medium_det), the model files will be automatically downloaded` five
+times and pulled **177 MB** before Uvicorn answered anything. Baking that into the image with
+`python -c "from paddlex import create_pipeline; create_pipeline(pipeline='OCR')"` took the cold
+start from about 90 seconds to **10**, and — because the service is otherwise stateless — removed the
+need for a volume entirely. **This is the portfolio's first template with no volume at all.**
+
+The second cold start is the one that would have shipped unnoticed. With the weights already on disk,
+the **first inference** still cost **98 seconds**, against roughly **4 seconds** for every request
+after it: loading the weights into memory and initialising Paddle's executor is a separate expense
+from fetching them. A template that stopped at baking the models would have handed its first real
+user a 98-second request and looked broken. The fix is a throwaway inference at startup, on a small
+image generated at build time, run *before* Caddy opens — so the healthcheck cannot pass until the
+model is genuinely warm. Measured after: the first user request takes **5.4 s**, the same as the
+second. **Generalises: "it downloaded the model" and "it is ready to serve" are different events;
+time the first real request, not the boot.**
+
+Both numbers were measured under `--platform linux/amd64` emulation on Apple Silicon, so their
+absolute values mean nothing — the ratio is the finding. On Railway the warm figures are about
+2.8–3.5 s for a small image and ~10 s for an 1800×600 scan, round trip included.
+
+**And then the deployment failed in a way the local rehearsal could not have shown.** With the image
+built, the credential working and the healthcheck green, every single `POST /ocr` returned **500**:
+
+```
+NotImplementedError: (Unimplemented) ConvertPirAttribute2RuntimeAttribute
+not support [pir::ArrayAttribute<pir::DoubleAttribute>]
+  at .../new_executor/instruction/onednn/onednn_instruction.cc:116
+```
+
+PaddleX enables oneDNN by default and PaddlePaddle 3.3.1's PIR executor cannot lower that operator.
+The local rehearsal passed because an emulated CPU never takes the oneDNN path at all. The fix is one
+documented switch, `PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT=False`, and `paddlex/utils/flags.py` accepts
+the string `"False"`.
+
+The lesson is worth stating precisely, because it is the mirror of §5.31. There, testing on the wrong
+architecture produced a false **failure** — llama.cpp reported as broken when it worked. Here the same
+emulation produced a false **pass**: a green local rehearsal for something that failed on every real
+request. **The false pass is the more dangerous of the two, because nothing prompts you to re-check
+it.** For anything compute-heavy, the deployment is the only test that counts, and "the healthcheck is
+green" is not the same as "a real request works" — which is why the one-click verification for this
+template exercises `POST /ocr` rather than `/healthz`.
+
+Smaller findings. Caddy is Go, so `:8080` is dual-stack and Railway's IPv4 edge reaches it, while
+inference sits alone on `127.0.0.1:8081`. `/healthz` is answered by Caddy itself, because every
+PaddleX route is an inference endpoint and pointing a credential-free healthcheck at one would open a
+hole. The proxy needs raising from its defaults for this workload — a 32 MB body cap for scans and a
+300 s read timeout, because CPU OCR is not instant. PaddleX's serving extra pins
+`opencv-contrib-python`, the **non-headless** build, so the image needs `libgl1` and `libglib2.0-0`
+alongside `libgomp1` for Paddle's OpenMP runtime. The default `OCR` pipeline resolves to **PP-OCRv6
+medium**, newer than the PP-OCRv5 figures in upstream's benchmark tables, so those numbers are
+indicative rather than exact. And the SIGTERM trap from §5.32 was carried over from the start rather
+than rediscovered — a clean stop exits 0 in under a second. One correction to §5.32's note on
+optional template variables: they are omitted from a one-click deploy only when their default is
+**empty**. `PADDLEOCR_MAX_BODY` and `PADDLEOCR_TIMEOUT` are optional with real defaults and were
+provisioned normally.
 
 ---
 
