@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-eight of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy** and **Trivy Server**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-nine of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness**, **Scrumboy**, **Trivy Server** and **QwenPaw**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1563,6 +1563,105 @@ probe fails, re-run it in isolation before believing what it seems to say about 
 testing.** All three of `0.0.0.0:PORT`, `:PORT` and `[::]:PORT` produce the *same* single dual-stack
 socket, so the bind form is a non-issue here; `0.0.0.0` is used because it is upstream's documented
 form. A clean SIGTERM exits 0, so `ALWAYS`.
+
+### 5.31 The relay was the danger, not the bind (QwenPaw)
+
+[QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache-2.0, ~35k stars) is a self-hosted
+personal assistant: a web console with chat, long-term memory, skills, a plugin system, browser
+automation against a real Chromium, and an agent that runs shell commands. Upstream publishes a
+multi-arch image, `agentscope/qwenpaw`, at 2.84 GB on disk — by far the largest base in this
+portfolio, and the finished template adds two layers to it.
+
+**The finding that mattered: a socat relay would have silently switched authentication off.**
+QwenPaw skips authentication entirely for peers on `127.0.0.1` and `::1` —
+`security.allow_no_auth_hosts` defaults to exactly those two — and a relay inside the container makes
+*every* request arrive from loopback. Measured against v2.2.1: `GET /api/skills` answers **401** from
+a real network peer and **200** through a relay. A deployment built that way would look correct in
+every respect, with the auth variables set and the login page rendering, while the whole API stood
+open to anyone with the URL.
+
+Three templates in this portfolio (§5.23, §5.24, §5.26) put a relay in front of a service whose
+runtime could not bind the address family Railway needed. **That reflex is the bug here.** Before
+reaching for the relay, check what the application does with the peer address — a proxy inside the
+container rewrites it, and any authentication that depends on it silently changes meaning.
+
+**The obvious fix was wrong, and measuring caught it.** The first attempt patched upstream's
+supervisord template from `--host 0.0.0.0` to `--host ::`, on the reasoning that Railway's private
+network is IPv6-only. The patch worked exactly as intended and the deployment still failed: Railway's
+edge returned **502 on every path** while the app answered **200 on `[::1]`** from inside the same
+container, with `/proc/net/tcp6` holding `[::]:8080` and `/proc/net/tcp` empty. Python sets
+`IPV6_V6ONLY`, so `::` is an IPv6-only socket, and **Railway's public proxy reaches the container over
+IPv4.** IPv6 is what *private networking between services* needs; it is not what the public edge
+uses. A single-service template with a public domain wants `0.0.0.0`.
+
+So the correct wrapper changes the bind not at all. Upstream's own `--host 0.0.0.0` is right: the
+edge connects to it directly, the peer address is Railway's proxy rather than loopback, and the login
+is enforced. The Dockerfile carries a comment saying both of these things were tried, so the next
+person does not re-add either.
+
+**Upstream's own defence-in-depth is what makes the plain bind safe**, and it is worth reading
+before trusting a template like this. `app/auth.py` does not merely check the resolved client IP
+against the whitelist; when that IP is loopback it *also* requires the direct TCP peer to be
+loopback, logging "Auth skip blocked" otherwise. So a spoofed `X-Forwarded-For` cannot reach the
+bypass from outside — only a process inside the container's network path can. That is precisely why
+the relay was dangerous and the direct bind is not.
+
+**Authentication is off by default and upstream's container entrypoint only warns about it**, in a
+banner conceding that QwenPaw "cannot verify whether access to the service is limited to a trusted
+network". The template requires `QWENPAW_AUTH_ENABLED=true` and a password of at least 12 characters
+and refuses to boot otherwise — including refusing an explicit `QWENPAW_AUTH_ENABLED=false` with a
+message explaining why, rather than silently overriding the operator.
+
+**The auto-registration variables are write-once, and that surprises people.** Upstream creates the
+admin account on first boot and then ignores `QWENPAW_AUTH_USERNAME` and `QWENPAW_AUTH_PASSWORD`
+entirely. Measured by replacing the container with a different password on the same volume: the
+original password still returned **200** and the new one **401**. The listing says so, because the
+obvious way to rotate a credential — edit the variable, redeploy — does nothing here.
+
+**Three state directories, one volume.** `QWENPAW_WORKING_DIR`, `QWENPAW_SECRET_DIR` and
+`QWENPAW_BACKUP_DIR` all default under `/app`; all three are plain environment variables, so they
+consolidate onto `/data`. Upstream's entrypoint runs `qwenpaw init --defaults --accept-security` when
+`config.json` is absent, so a bare volume self-initialises and a populated one is left alone —
+verified by container replacement.
+
+**On local models, measure on the architecture you deploy to.** QwenPaw can download a llama.cpp
+runtime and serve a GGUF model in-container, and the first measurement said it could not: upstream's
+pinned `b8744` build failed with `GLIBC_2.38 not found` against the image's Debian 12 (glibc 2.36).
+That test ran on arm64, because the development machine is Apple Silicon. Re-run on **amd64**, which
+is what Railway runs, the same pinned build loads its CPU backend and reports its version cleanly.
+**The x64 and arm64 release binaries are not built against the same toolchain, and an architecture
+mismatch in a rehearsal produces a confident, wrong "does not work".**
+
+Two honest caveats reached the listing anyway. Upstream's backend resolver returns `cpu` for Linux
+unconditionally, so there is no acceleration path. And the model recommendation calls
+`sysconf(SC_PHYS_PAGES)` with no cgroup awareness — zero matches for "cgroup" in the whole module —
+so in a container it reports the *host's* RAM and recommends the 9B tier (5.48 GB and 10.59 GB) to
+everyone, whatever the service's real limit.
+
+**Not everything in the image is a feature you can use.** The container runs Xvfb and xfce4 under
+supervisord, which reads like a streamable desktop; there is no VNC, noVNC, websockify or x11vnc
+anywhere in the project, and that display exists solely so Playwright can drive a headed Chromium.
+The Computer Use plugin, which *would* show a desktop, is documented as "supported on Windows and
+macOS" via a native helper shipped with the desktop application and reached over a named pipe or Unix
+socket, so it is inert in a container. And the agent's shell is a chat tool card with an approval
+flow, not a terminal: the console ships no xterm.js. **Read what the extra processes are for before
+advertising them.**
+
+Smaller findings. A clean `SIGTERM` exits **0**, so `ALWAYS` (§5.27's lesson again). The healthcheck
+is `/api/auth/status`, public by necessity, returning only `{"enabled":true,"has_users":true}` — it
+proves the app is serving in a way `/` alone does not. Idle memory is about 600 MB before any model
+or browser work. Two Railway API details cost time. On a service created through
+`serviceCreate`, the `railway.json` healthcheck did not take effect — `serviceInstance` reported
+`healthcheckPath: null` and the first deployment's manifest agreed — so it was set explicitly with
+`serviceInstanceUpdate`. And `serviceInstanceDeployV2` redeploys the *last known* commit unless you
+pass `commitSha`, which quietly rebuilt superseded code once; the giveaway was the entrypoint's own
+startup line still naming the old bind. **Read your own log line, not the deploy status.** A third:
+`railway templates create` refuses a service whose repo was set through `serviceCreate` alone
+("does not have a source that can be used to generate a template") until a `deploymentTriggerCreate`
+connects the branch. Finally, publishing
+collided with a stale incumbent — a `qwenpaw` template created 2026-04-13 pinning `v1.1.0` with no
+healthcheck, `ON_FAILURE`, one volume at `/app/working` and no auth variables at all — so this one
+published as `qwenpaw-1`.
 
 ---
 

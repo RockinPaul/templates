@@ -731,3 +731,26 @@ templates:
           - "docs/guide/references/configuration/cli/trivy_server.md"
           - "Dockerfile"
           - "LICENSE"
+  - name: QwenPaw
+    template_repo: RockinPaul/qwenpaw_railway_template
+    deploy_url: https://railway.com/deploy/qwenpaw-1
+    notes: "Thin wrapper over upstream's own multi-arch image, used unmodified - only env vars and an entrypoint. Requires a login upstream leaves optional, and deliberately runs NO relay, because QwenPaw skips auth for 127.0.0.1/::1 and an in-container proxy would silently disable the login (measured 200 via relay vs 401 direct). Rebinding to :: was tried and reverted, since Python sets IPV6_V6ONLY and Railway's public proxy is IPv4. Auto-registration variables are write-once. Apache-2.0. See guide §5.31."
+    upstreams:
+      - name: qwenpaw image
+        repo: agentscope-ai/QwenPaw
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+QWENPAW_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "deploy/Dockerfile"
+          - "deploy/entrypoint.sh"
+          - "deploy/config/supervisord.conf.template"
+          - "src/qwenpaw/app/auth.py"
+          - "src/qwenpaw/local_models/manager.py"
+          - "src/qwenpaw/local_models/llamacpp.py"
+          - "website/public/docs/security.en.md"
+          - "website/public/docs/models.en.md"
+          - "LICENSE"
