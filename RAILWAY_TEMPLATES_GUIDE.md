@@ -1851,6 +1851,79 @@ provisioned normally.
 
 ---
 
+### 5.34 A credential upstream leaves lying around, and two variables that read as a database fault (Marmot)
+
+[Marmot](https://github.com/marmotdata/marmot) (MIT) is a data catalog: it indexes the tables, topics,
+queues and APIs you already run and makes them searchable by a team in a web UI and by agents over
+MCP. Upstream publishes multi-arch images of a static Go binary with the frontend embedded, running
+as a non-root user on Alpine, so the template is a thin `FROM ghcr.io/marmotdata/marmot:0.10.0` plus
+`su-exec` — BusyBox's `setpriv` is a capabilities-only stub with no `--reuid`, so the usual Alpine
+tool for dropping privileges has to be installed.
+
+**The reason the template exists.** Marmot's built-in account is `admin:admin`, and upstream's Docker
+guide simply tells you to change it after first login. On a public Railway domain the gap between
+"deployed" and "got around to it" is a catalog, a REST API *and* an MCP endpoint standing open to
+whoever tries the obvious pair. Same answer as §5.29: the entrypoint starts Marmot bound to
+`127.0.0.1:18080`, signs in with the default credential, PATCHes the password to
+`MARMOT_ADMIN_PASSWORD`, waits for that listener to actually disappear, and only then execs the
+public one. Idempotent — on later boots the default login fails, the step is skipped, and a password
+a human rotated from the UI is left alone — and fail-closed, refusing to start on an empty or
+under-12-character password. The `su-exec` call is backgrounded directly rather than through a shell
+function, because a function call runs in a subshell and `$!` would then be the subshell's pid,
+leaving the bootstrap server alive holding database connections.
+
+**A 32-byte key that `${{secret(N)}}` cannot express.** `MARMOT_SERVER_ENCRYPTION_KEY` must
+base64-decode to *exactly* 32 bytes for XChaCha20-Poly1305, and Railway's `${{secret(N)}}` produces a
+random alphanumeric string, which is not that. So the template generates `MARMOT_ENCRYPTION_SEED` and
+the entrypoint derives the key as `base64(sha256(seed))`. The derivation is deterministic, which is
+the point: credentials encrypted by one deployment stay readable by the next. This is the general
+case of the `${{secret(32, "abcdef0123456789")}}` trick in §7 — when a fixed alphabet cannot satisfy
+the consumer either, derive rather than generate.
+
+**Two variable bugs that both present as a database fault.** Worth knowing because the error message
+points at Postgres in each case and Postgres is fine in both.
+
+First, `${{Postgres.PGPASSWORD}}` resolved to an empty string. A service built from the
+`postgres-ssl` image with its variables set by hand exposes `POSTGRES_USER` / `POSTGRES_PASSWORD` /
+`POSTGRES_DB` and nothing else; the `PG*` aliases that Railway's own Postgres *template* provides —
+the ones §5's earlier templates reference — are not there. A `${{Service.VAR}}` reference to a
+variable the source service does not define **does not fail the upsert and does not warn**: it
+resolves to empty, and the runtime symptom is `password authentication failed for user "postgres"`,
+which reads as a wrong password rather than a missing one. Diagnose by reading the *consumer's*
+resolved variables and checking their **length**; zero proves a bad reference. Never assume a
+producing service's variable names — read them.
+
+Second, a trailing newline from `openssl rand -base64` survived into the connection string, and pgx
+rejected it with ``cannot parse `postgres://…`: failed to parse as URL (net/url: invalid control
+character in URL)`` — an error that names the URL and never the variable. The Postgres role itself
+was never wrong: `docker-entrypoint` writes the password to a pwfile and `initdb` reads only the
+first line, so the stored role password was already the trimmed form and fixing the variable needed
+no database reset. **The trap when fixing it:** shell `$(…)` command substitution strips trailing
+newlines, so `CUR=$(fetch)` compared against its own trimmed value reports "already clean" on a value
+that is dirty, and a plain `echo` shows nothing wrong. Trim and compare inside `jq`
+(`sub("\\s+$"; "")`) and inspect with `jq '.value|@json'` so a stray `\n` is visible.
+
+**Generation nulled every literal, exactly as §3.9.1 warns.** Nine variables came back
+`defaultValue: null, isOptional: false` — required composer fields with no value — while every
+`${{…}}` reference survived intact. Restored in one `templateChangeSetStage`/`Apply` patch against
+the internal endpoint: `PGDATA`, `POSTGRES_DB`, `POSTGRES_USER`, `PORT`, `MARMOT_DATABASE_PORT` and
+`MARMOT_DATABASE_SSLMODE` as literals, and `POSTGRES_PASSWORD`, `MARMOT_ADMIN_PASSWORD`,
+`MARMOT_ENCRYPTION_SEED` as `${{secret(N)}}`. Read back with an explicit "any default still null?"
+assertion rather than by eye. The proof that it worked is behavioural: `railway deploy -t marmot`
+prompted for nothing.
+
+**Plugins are why there is a volume.** Marmot installs 31 connector plugins from `ghcr.io` at every
+startup, roughly 800 MB, with no setting to narrow the list, so the first boot takes minutes —
+`healthcheckTimeout` is 900 in `railway.json` for that reason. `MARMOT_PLUGINS_DIR=/data/plugins`
+moves the cache onto the volume and turns it into a one-time cost; `MARMOT_PLUGIN_CACHE_DIR` defaults
+to `<plugins>/cache`, so that one variable moves both. The catalog itself — assets, lineage, glossary,
+teams, users, API keys — lives entirely in Postgres, so 1024 MB volumes are generous on both services.
+
+Upstream also publishes `-previewN` tags; `tag_pattern: '^v\d+\.\d+\.\d+$'` excludes them, and as in
+§5.29 the image tag is semver without the `v` that the git tag carries.
+
+---
+
 ## 7. Gotcha catalogue (quick reference)
 
 Networking / binding

@@ -39,6 +39,7 @@ Template repositories built with it:
 | QwenPaw | https://railway.com/deploy/qwenpaw-1 | [qwenpaw_railway_template](https://github.com/RockinPaul/qwenpaw_railway_template) |
 | ReMe | https://railway.com/deploy/reme | [reme_railway_template](https://github.com/RockinPaul/reme_railway_template) |
 | PaddleOCR | https://railway.com/deploy/paddleocr | [paddleocr_railway_template](https://github.com/RockinPaul/paddleocr_railway_template) |
+| Marmot | https://railway.com/deploy/marmot | [marmot_railway_template](https://github.com/RockinPaul/marmot_railway_template) |
 
 ## Weekly upstream update assessment
 

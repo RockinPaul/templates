@@ -795,3 +795,24 @@ templates:
           - "deploy/docker"
           - "pyproject.toml"
           - "LICENSE"
+  - name: Marmot
+    template_repo: RockinPaul/marmot_railway_template
+    deploy_url: https://railway.com/deploy/marmot
+    notes: "Thin wrapper over upstream's own multi-arch image plus su-exec. The entrypoint replaces Marmot's built-in admin:admin against a loopback-only listener before the public port opens, because upstream ships that credential and only tells you to change it after first login — on a public domain that would leave the catalog, the REST API and the MCP endpoint open to whoever tries the obvious pair. Image tags are semver WITHOUT a v prefix; the git tag has one, and upstream also publishes -previewN tags that the tag_pattern deliberately excludes. MARMOT_SERVER_ENCRYPTION_KEY must base64-decode to exactly 32 bytes, which ${{secret(N)}} cannot produce, so the key is derived as base64(sha256(MARMOT_ENCRYPTION_SEED)). Plugins (31 of them, ~800 MB, no way to narrow the list) install from ghcr.io at every startup, so MARMOT_PLUGINS_DIR points at the volume to pay for it once. MIT. See guide §5.34."
+    upstreams:
+      - name: marmot image
+        repo: marmotdata/marmot
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+MARMOT_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "Dockerfile"
+          - "web/docs/docs/Deploy"
+          - "web/docs/docs/Configure"
+          - "web/docs/docs/MCP"
+          - "web/docs/docs/quick-start.md"
+          - "web/docs/docs/introduction.md"
+          - "LICENSE"
