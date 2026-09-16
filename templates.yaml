@@ -688,3 +688,25 @@ templates:
           - "packages/server/src/auth/auth-service.ts"
           - "packages/docs/content/docs/quickstart-docker.en.md"
           - "LICENSE"
+  - name: Scrumboy
+    template_repo: RockinPaul/scrumboy_railway_template
+    deploy_url: https://railway.com/deploy/scrumboy-1
+    notes: Thin wrapper over upstream's own multi-arch image plus curl and tini. The entrypoint claims the Owner account against a loopback-only listener before the public port opens, because Scrumboy gives ownership to the first caller of /api/auth/bootstrap and serves anonymous reads and writes until then. Image tags are semver WITHOUT a v prefix; the git tag has one. AGPL-3.0. See guide \u00a75.29.
+    upstreams:
+      - name: scrumboy image
+        repo: markrai/scrumboy
+        kind: tag
+        tag_formats: ["v{version}"]
+        tag_pattern: '^v\d+\.\d+\.\d+$'
+        pins:
+          - file: Dockerfile
+            pattern: '^ARG\s+SCRUMBOY_VERSION=(?P<version>[\w.-]+)'
+        relevant_paths:
+          - "Dockerfile"
+          - "docker-compose.yml"
+          - "docs/docker.md"
+          - "docs/environment-variables.md"
+          - "docs/roles-and-permissions.md"
+          - "docs/recovery.md"
+          - "API.md"
+          - "LICENSE"

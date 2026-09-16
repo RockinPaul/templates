@@ -1,6 +1,6 @@
 # Railway Templates Guide
 
-How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-six of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy** and **PenguinHarness**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
+How to turn an open-source project into a one-click Railway marketplace template, collected while building and publishing twenty-seven of them in September 2026: **cognee**, **Multica**, **Fabric**, **LongMemory**, **projectmem**, **gortex**, **Observal**, **WeKnora**, **EverOS**, **Notesnook**, **Pipecat**, **OpenPencil**, **Persistent mise Workspace**, **HertzBeat**, **Laminar**, **OpenKnowledge**, **tlbx**, **codeg**, **Orca**, **DSH + LongMemory**, **Mirage Daemon**, **Yao Agents**, **HolyClaude Workstation**, **Octop**, **Coddy**, **PenguinHarness** and **Scrumboy**. Everything here was learned the hard way on real deployments; the "gotcha" sections are the most valuable part. The guide is written for a developer or an agent who has never touched Railway templates and has to repeat this end to end.
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
@@ -1440,6 +1440,68 @@ argument — there is no `--query` flag — and the CLI's stored credential move
 Second, and worse, is §7's new entry: the marketplace readme renderer **silently strips
 `<https://…>` autolinks**.
 
+### 5.29 An instance that belongs to whoever arrives first, and the race made into a test (Scrumboy)
+
+[Scrumboy](https://github.com/markrai/scrumboy) (AGPL-3.0, ~434 stars, releases several times a
+week) is self-hosted project management: boards, cross-project analytics, calendar-aware planning, a
+sticky-note wall, and an MCP layer so an agent can file work on the same board as the humans. It is
+one static cgo-free Go binary over SQLite, so the finished image is **44 MB** and the whole
+persistence story is a volume at `/data`.
+
+Almost everything about it is what a template wants, which is why this section is short on plumbing
+and long on one problem. `BIND_ADDR` is a plain environment variable, so mapping `PORT` onto it is
+one line. `GET /healthz` is handled **before** any auth middleware and genuinely pings the store,
+returning 503 when the database is unhappy instead of a reassuring static 200. Authentication is on
+by default (`SCRUMBOY_MODE=full`; `anonymous` is the opt-in that turns it off). And Go binds
+dual-stack on `:8080` — one socket in `tcp6`, no separate v4 listener — so this is the **third**
+template needing no socat.
+
+**The whole instance belongs to whoever calls one endpoint first.** Upstream's roles table is
+blunt: the Owner is "the first user on an empty instance", and "there is **no** supported public
+path to promote another user to Owner". What the docs do not say, and what one probe does, is how
+open the instance is while it waits:
+
+| Request | Before bootstrap | After bootstrap |
+|---|---|---|
+| `GET /api/projects` | **200** | 401 |
+| `POST /api/projects` | **201** | 401 |
+| `POST /api/auth/bootstrap` | 201, claims the instance | 409 |
+
+So an unclaimed Scrumboy is not merely "waiting for its owner", it is an open read-write API on a
+public URL. This is the §5.25 land grab again, and the resolution is the same shape: claim the
+account **before the public listener exists**. It is far easier here, because `BIND_ADDR` is just a
+variable — the entrypoint starts the server on `127.0.0.1:9931`, posts the bootstrap, stops it, and
+only then starts the real server on `$PORT`. No s6 handoff to lose the job in.
+
+Two details worth copying. The bootstrap is **idempotent by status code**: 201 means this boot
+claimed it, 409 `already bootstrapped` means a previous boot did, and anything else exits the
+container rather than opening a port on an unclaimed instance. And the password goes in on
+**stdin** via `curl --data-binary @-`, so it never enters the process table — verified afterwards
+by grepping both `ps` output and the logs for it, and finding nothing.
+
+**The race was turned into a test rather than an argument.** §5.25's lesson was that a background
+registration loses to the healthcheck, and the only way that was discovered was a probe that
+actually tried to steal the account. So this build ran the attack deliberately: a loop posting
+`/api/auth/bootstrap` at the published port, from the instant the container started, 400 times. It
+saw **82 connection-refused and 318 `409`, and not one 201**. That is the difference between
+believing a design is race-free and knowing it. **When a template closes a race, make the race part
+of the rehearsal.**
+
+Smaller findings. The encryption key that protects TOTP secrets, password-reset material and
+encrypted calendar URLs must be **base64 of exactly 32 bytes**, which `${{secret(N)}}` cannot
+express — so the entrypoint generates it on first boot and keeps it on the volume, which is what
+upstream's own launchers do; it belongs to the same backup unit as `app.db`, because once encrypted
+data exists a missing key stops startup. `SCRUMBOY_PUBLIC_BASE_URL` takes
+`https://${{RAILWAY_PUBLIC_DOMAIN}}` and **survives template generation** as a reference, unlike
+every literal beside it. A clean SIGTERM exits 0, so `ALWAYS` again.
+
+**The marketplace already had a `scrumboy` template, and that is worth checking before naming
+yours.** Publishing slugged this one to **`scrumboy-1`**. The incumbent builds upstream's repository
+directly and declares **no variables, no healthcheck, no domain and no deploy block at all** — so a
+deployment made from it has no owner password, which means it hands ownership to whoever reaches the
+URL first, exactly the failure this template exists to prevent. Differentiation is worth stating in
+the README rather than leaving a visitor to guess why there are two.
+
 ---
 
 ## 7. Gotcha catalogue (quick reference)
@@ -1457,6 +1519,9 @@ Networking / binding
 - Preflight `OPTIONS` carries no Authorization; let it through to the app's CORS middleware or browser clients cannot call the API.
 
 Build / verification discipline
+- **When a template closes a race, make the race part of the rehearsal.** Scrumboy's owner account is claimed by whoever posts to the bootstrap endpoint first, so the build ran the attack on purpose: 400 bootstrap attempts against the published port from the instant the container started, scoring 82 connection-refused, 318 `409`, and zero successes. A design that is believed to be race-free and one that is measured to be are different things (§5.29).
+- **Check whether the marketplace already carries a template for your upstream before naming yours.** Publishing slugs the name, so an incumbent pushes you to `<name>-1`. Read the incumbent's `serializedConfig`: the one holding `scrumboy` declares no variables, healthcheck, domain or deploy block, which is worth saying in the README rather than leaving a visitor to guess why there are two (§5.29).
+- **An app can be open *before* its first account exists, not just after.** Scrumboy answers anonymous `GET` **and `POST`** until bootstrap completes, and 401s both afterwards. Probe the pre-bootstrap state with a write, not a read (§5.29).
 - **The marketplace readme renderer strips `<https://…>` autolinks.** Use `[text](url)` everywhere in `TEMPLATE_OVERVIEW.md`, and verify by reading the *published* `readme` back, not the file you uploaded (§3.9).
 - **`railway api` takes the GraphQL document as a positional argument** — there is no `--query` flag — and the CLI's stored credential is `user.accessToken` in `~/.railway/config.json`, not `user.token`. Reading the old key sends `Bearer None`, which fails at the GraphQL *validation* layer with a message that never mentions auth (§5.28).
 - **Read the upstream entrypoint before replacing it.** PenguinHarness already chowned only the top level of its data root, tolerated a mount that refuses chown, and `exec setpriv`-ed in place so tini kept the server as its direct child. The honest wrapper was `ENV` plus one guard (§5.28).
@@ -1608,6 +1673,7 @@ Docs
 | Octop | `octop` | octop (`python:3.12-slim` + the released PyPI wheel installed with uv, socat relay, 996 MB, state on a 5 GB volume at `/data`) — **1 service** | `OCTOP_DEFAULT_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. The published wheel already carries the built React dashboard, so upstream's npm stage is skipped; **pip cannot install it at all** (`ResolutionTooDeep`) so uv is mandatory, and `evdev` needs a compiler at build time. uvicorn cannot bind dual-stack → socat. Upstream already randomises the admin password into `credential.txt`; the template supplies a secret instead so it shows in the Railway UI, and deliberately does **not** re-apply it on later boots. `railway.json`'s healthcheck read back null — set on the service instance instead (§5.26) |
 | Coddy | `coddy` | coddy (`alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. Telegram gateway absent: the published image is built without that tag (§5.27) |
 | PenguinHarness | `penguinharness` | penguin (`hiyouga/penguinharness:0.2.11` upstream multi-arch image used as-is, state on a 5 GB volume at `/data`) — **1 service** | `PENGUIN_SEED_ADMIN_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. Upstream's own entrypoint already chowned only the top level of the data root and `exec setpriv`-ed in place, so the wrapper adds environment plus one guard and nothing else. Authentication is **on** by default — the hosted problem was the delivery channel: with no password configured the server prints a one-time claim link to the container log. Seeding happens only while no user exists, and the claim link returns while the password is still flagged initial, so rotating the variable leaves a way in rather than a lockout (all four states measured). Node binds dual-stack on `::` → **no socat**; `ALWAYS` because a clean SIGTERM exits 0 (§5.28) |
+| Scrumboy | `scrumboy-1` | scrumboy (`ghcr.io/markrai/scrumboy:3.34.0` upstream multi-arch image used as-is + curl/tini, **44 MB**, SQLite on a 5 GB volume at `/data`) — **1 service** | `SCRUMBOY_OWNER_PASSWORD=${{secret(24)}}` plus prefilled `PORT=8080`, `SCRUMBOY_OWNER_EMAIL` and `SCRUMBOY_PUBLIC_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (the reference survives generation; the literals did not). The Owner is whoever posts to `/api/auth/bootstrap` first and the API serves anonymous **reads and writes** until then, so the entrypoint claims it against a `127.0.0.1` listener before the public port opens, idempotent on 201/409 and fail-closed otherwise; **the race was run as a test** — 400 attacker attempts, zero wins. Password passed on stdin, absent from `ps` and logs. Encryption key is base64 of 32 bytes so `${{secret}}` cannot express it: generated on first boot onto the volume. Third no-socat Go service; `ALWAYS` because SIGTERM exits 0. Published as `scrumboy-1` because a third-party `scrumboy` with no variables or healthcheck already existed (§5.29) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
