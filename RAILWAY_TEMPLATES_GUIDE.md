@@ -988,6 +988,17 @@ reimplemented: the cookie is still minted by DSH with its own secret.
   bare "authentication required; reopen the URL printed by dsh web". Only the app knows whether a
   cookie is good, so the trigger is its 401, through `handle_response` on the reverse_proxy, and the
   fresh token overwrites the bad cookie. Cookie PRESENCE is not authentication state.
+- **SameSite=Strict MEANS THE COOKIE YOU JUST SET IS WITHHELD WHEN THE VISITOR ARRIVED FROM
+  ANOTHER SITE.** DSH sets its session cookie `SameSite=Strict`, and a browser withholds Strict
+  cookies on the first request after a CROSS-SITE navigation — including the tail of a redirect
+  chain, which inherits the original initiator. A deployer clicking through from the Railway
+  dashboard therefore completed the exchange, was handed the cookie, and still landed on DSH's
+  "authentication required". Reported from a real browser after three earlier fixes; every test
+  until then used `page.goto`/curl, i.e. an address-bar navigation, which is same-site and passes.
+  **Arrival context is part of the test matrix: click through from a foreign origin, do not only
+  type the URL.** The fix has to be a PAGE served from your own origin whose script navigates on —
+  another redirect inherits the same cross-site initiator and is withheld again. Send it to a second
+  marker the sign-in rule declines, so a browser that truly cannot store cookies ends on one 401.
 - **Couple the convenience to the credential.** Auto sign-in hands a session to whoever reaches the
   index, so it is armed only when a gate password exists; clearing the password disables both and
   falls back to the printed token. A template that let the two drift apart would publish the harness
@@ -2001,6 +2012,12 @@ Redirect loops
 - Trigger sign-in from the app's 401, not from the absence of a session cookie. A cookie the app
   rejects is indistinguishable from a good one at the proxy, and treating presence as proof
   suppresses sign-in forever (§5.22). Test with a deliberately invalid cookie, not only with none.
+- A SameSite=Strict session cookie is withheld on the first request after a cross-site navigation,
+  and a redirect chain inherits its original initiator — so a sign-in flow that ends in a redirect
+  strands anyone who arrived by clicking a link. Recover with a page served from your own origin
+  whose script navigates on; that navigation is same-site and carries the cookie (§5.22).
+- Test arrival context, not just the URL: `page.goto` and curl are address-bar navigations and are
+  always same-site. Click through from a foreign origin to see what a real visitor sees.
 
 Startup ordering
 - A container is routable before your gateway listens, so anything you make the gateway wait for is
