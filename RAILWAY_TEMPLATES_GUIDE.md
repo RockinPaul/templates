@@ -971,6 +971,17 @@ reimplemented: the cookie is still minted by DSH with its own secret.
   Generalises past Caddy: **when a config language reorders what you wrote, an auth check is not
   "first" because it is written first** — assert the negative case on the exact path the other
   directive matches.
+- **AN AUTO-REDIRECT INTO AN APP'S OWN SIGN-IN IS A LOOP WAITING FOR A BROWSER THAT WON'T KEEP
+  THE COOKIE.** DSH ends its token exchange with 303 to `/`, which is exactly what the sign-in
+  redirect matches, so the flow terminates only because the session cookie comes back. Blocked,
+  auto-cleared by an extension, or a locked-down profile and the browser bounces forever — reported
+  from a real one as Firefox's "The page isn't redirecting properly", while curl, Chromium and a
+  clean Firefox all passed. A cookie jar in the test is not a browser. Fix: rewrite the app's 303
+  onto a marker (`header_down Location ^/$ /?signedin=1`) the matcher ignores, so the second visit
+  falls through and answers one 401. **Anything that redirects into a state-setting exchange needs a
+  termination condition that does not depend on the state being set.** Reproduce it by running the
+  flow with cookies disabled, which is now a test assertion and a `network.cookie.cookieBehavior=2`
+  Firefox run.
 - **Couple the convenience to the credential.** Auto sign-in hands a session to whoever reaches the
   index, so it is armed only when a gate password exists; clearing the password disables both and
   falls back to the printed token. A template that let the two drift apart would publish the harness
@@ -1972,6 +1983,15 @@ Upstream also publishes `-previewN` tags; `tag_pattern: '^v\d+\.\d+\.\d+$'` excl
 ---
 
 ## 7. Gotcha catalogue (quick reference)
+
+Redirect loops
+- An auto-redirect into an app's own sign-in terminates only because the session cookie comes back.
+  A browser that will not keep it (extension, blocked cookies, locked-down profile) loops forever.
+  Give the flow a termination condition that does not depend on the state being set — rewrite the
+  app's post-exchange redirect onto a marker the matcher ignores, so the second visit falls through
+  and answers one 401 (§5.22).
+- curl with a cookie jar, and a clean browser profile, both pass while a real user's browser loops.
+  Test the flow with cookies DISABLED, not just enabled.
 
 Startup ordering
 - A container is routable before your gateway listens, so anything you make the gateway wait for is
