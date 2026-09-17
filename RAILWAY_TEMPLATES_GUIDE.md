@@ -982,6 +982,12 @@ reimplemented: the cookie is still minted by DSH with its own secret.
   termination condition that does not depend on the state being set.** Reproduce it by running the
   flow with cookies disabled, which is now a test assertion and a `network.cookie.cookieBehavior=2`
   Firefox run.
+- **LET THE APP DECIDE WHEN SIGN-IN IS NEEDED; A PROXY CANNOT.** The redirect first fired only when
+  no session cookie was present, which reads as obvious and is wrong: a cookie DSH REJECTS — stale,
+  expired, partially stored — then suppresses sign-in permanently, stranding the visitor on DSH's
+  bare "authentication required; reopen the URL printed by dsh web". Only the app knows whether a
+  cookie is good, so the trigger is its 401, through `handle_response` on the reverse_proxy, and the
+  fresh token overwrites the bad cookie. Cookie PRESENCE is not authentication state.
 - **Couple the convenience to the credential.** Auto sign-in hands a session to whoever reaches the
   index, so it is armed only when a gate password exists; clearing the password disables both and
   falls back to the printed token. A template that let the two drift apart would publish the harness
@@ -1992,6 +1998,9 @@ Redirect loops
   and answers one 401 (§5.22).
 - curl with a cookie jar, and a clean browser profile, both pass while a real user's browser loops.
   Test the flow with cookies DISABLED, not just enabled.
+- Trigger sign-in from the app's 401, not from the absence of a session cookie. A cookie the app
+  rejects is indistinguishable from a good one at the proxy, and treating presence as proof
+  suppresses sign-in forever (§5.22). Test with a deliberately invalid cookie, not only with none.
 
 Startup ordering
 - A container is routable before your gateway listens, so anything you make the gateway wait for is
