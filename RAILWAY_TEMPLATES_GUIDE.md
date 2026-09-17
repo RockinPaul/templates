@@ -982,12 +982,20 @@ reimplemented: the cookie is still minted by DSH with its own secret.
   process name, assert the port is free before binding, and put a run-unique value in the response
   when a test can be answered by the wrong process.**
 - **Reading a child's output costs you `exec`.** The token has to be parsed out of DSH's stdout, so
-  the entrypoint can no longer `exec` it: it now runs DSH against a FIFO, tees the stream through to
-  the deploy log unchanged, waits for the token with a bounded loop, then starts Caddy. That means
-  carrying DSH's exit status out by hand and trapping TERM to reach both children, neither of which
-  `exec` had needed. The wait is safe because the line lands ~2.4 s after start against a 300 s
-  health check — but it is bounded anyway, and a miss degrades to the old token flow rather than
-  hanging the boot.
+  the entrypoint can no longer `exec` it: it runs DSH against a FIFO and tees the stream through to
+  the deploy log unchanged. That means carrying DSH's exit status out by hand and trapping TERM to
+  reach both children, neither of which `exec` had needed.
+- **A CONTAINER IS ROUTABLE BEFORE YOUR GATEWAY LISTENS, SO ANYTHING YOU MAKE THE GATEWAY WAIT FOR
+  IS 502 TIME.** The first cut of the above waited for the token and *then* started Caddy, reasoning
+  that a ~2.4 s wait is nothing against a 300 s health-check timeout. That reasoning is simply wrong,
+  and a live deployment reported the 502: the health-check budget governs when Railway gives up on a
+  deploy, not when the edge starts sending traffic. Measured 3,016 ms of 502s on every restart,
+  redeploy and host migration — and the bounded loop would have made it 60 s on a slow boot. The fix
+  is ordering plus a reload: Caddy starts immediately with the gate in place and no redirect, and the
+  token arms auto sign-in afterwards through `caddy reload`, which needs `admin 127.0.0.1:2019`
+  rather than `admin off`. Re-measured at 60 ms, a 50× cut, with the redirect still armed ~3 s in.
+  **Never sequence a gateway behind a dependency's startup; start it and reconfigure it.** The test
+  now probes across the reload and asserts zero dropped requests.
 
 ---
 
@@ -1964,6 +1972,13 @@ Upstream also publishes `-previewN` tags; `tag_pattern: '^v\d+\.\d+\.\d+$'` excl
 ---
 
 ## 7. Gotcha catalogue (quick reference)
+
+Startup ordering
+- A container is routable before your gateway listens, so anything you make the gateway wait for is
+  time the edge spends answering 502. A health-check timeout governs when the platform gives up on a
+  deploy, NOT when it starts routing — do not reason from it about availability. Start the gateway
+  immediately and reconfigure it (`caddy reload`, needing `admin 127.0.0.1:2019`) rather than
+  sequencing it behind a dependency's startup. Measured 3,016 ms → 60 ms on DSH (§5.22).
 
 Auth in front of a proxy
 - Caddy sorts directives inside `handle`, and `redir` sorts BEFORE `basic_auth`. A sign-in redirect
