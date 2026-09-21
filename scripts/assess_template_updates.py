@@ -46,6 +46,8 @@ try:
 except ImportError:  # pragma: no cover - dependency error is reported plainly
     sys.exit("PyYAML is required: pip install pyyaml")
 
+import judgments  # TypeSafe commit judgments (optional at runtime; see judgments.py)
+
 # --------------------------------------------------------------------------- #
 # constants
 # --------------------------------------------------------------------------- #
@@ -221,6 +223,10 @@ class CommitInfo:
     date: str
     subject: str
     files: list[str] = field(default_factory=list)
+    # filled when TypeSafe judgments are enabled
+    security: float | None = None            # probability the commit is a security fix
+    impact: float | None = None              # 0 none, 1 worth knowing, 2 breaks existing deployments
+    impact_confidence: float | None = None
 
 
 @dataclass
@@ -260,6 +266,11 @@ class UpstreamResult:
     security_hits: list[CommitInfo] = field(default_factory=list)
     breaking_hits_total: int = 0
     breaking_hits: list[CommitInfo] = field(default_factory=list)
+    security_possible_total: int = 0                      # judged 0.5-0.8: listed, not counted
+    impact_breaking_total: int = 0                        # judged to break existing deployments
+    impact_notable_total: int = 0                         # judged worth knowing, deployments keep working
+    impact_hits: list[CommitInfo] = field(default_factory=list)
+    judged_by: str | None = None                          # model id when Jev judged the commits, else None
     latest_release: str | None = None
     latest_release_date: str | None = None
     newer_releases_total: int = 0
@@ -410,6 +421,52 @@ def keyword_hits(records: list[tuple[str, str, str, str, str]], kind: str) -> tu
     return len(hits), hits[:MAX_LISTED_HITS]
 
 
+def commit_files(repo: Path, rng_args: list[str], paths: list[str] | None = None) -> dict[str, list[str]]:
+    """sha -> first files touched, for the commits selected by rng_args (one git call)."""
+    cmd = ["log", "--format=%x1e%H", "--name-only", *rng_args]
+    if paths:
+        cmd += ["--", *pathspecs(paths)]
+    out = git(repo, *cmd, check=False)
+    files: dict[str, list[str]] = {}
+    for rec in out.split("\x1e"):
+        if not rec.strip():
+            continue
+        sha, _, rest = rec.partition("\n")
+        files[sha.strip()] = [l for l in rest.splitlines() if l.strip()][:judgments.MAX_FILES]
+    return files
+
+
+def apply_judgments(res: UpstreamResult, records: list[tuple[str, str, str, str, str]],
+                    judged: dict[str, judgments.Judgment] | None) -> None:
+    """Fill the security and deployer-impact fields of `res`: from Jev when judgments are available,
+    otherwise from the keyword regexes."""
+    if not judged:
+        res.security_hits_total, res.security_hits = keyword_hits(records, "security")
+        res.breaking_hits_total, res.breaking_hits = keyword_hits(records, "breaking")
+        return
+    infos: list[CommitInfo] = []
+    for sha, date, _author, subject, _body in records:
+        j = judged.get(sha)
+        if j is None:
+            continue
+        infos.append(CommitInfo(sha=sha, date=date, subject=subject, security=j.security, impact=j.impact,
+                                impact_confidence=j.impact_confidence))
+        res.judged_by = res.judged_by or j.model
+    sec_yes = [c for c in infos if judgments.security_bucket(c.security) == "yes"]
+    sec_possible = [c for c in infos if judgments.security_bucket(c.security) == "possible"]
+    res.security_hits_total = len(sec_yes)
+    res.security_possible_total = len(sec_possible)
+    res.security_hits = sorted(sec_yes + sec_possible, key=lambda c: -c.security)[:MAX_LISTED_HITS]
+    breaking = [c for c in infos if judgments.impact_bucket(c.impact) == "breaking"]
+    notable = [c for c in infos if judgments.impact_bucket(c.impact) == "notable"]
+    res.impact_breaking_total = len(breaking)
+    res.impact_notable_total = len(notable)
+    res.impact_hits = sorted(breaking + notable, key=lambda c: -c.impact)[:MAX_LISTED_HITS]
+    # the +1 "breaking" score contribution now comes from judged level-2 commits; the regex list is not shown
+    res.breaking_hits_total = len(breaking)
+    res.breaking_hits = []
+
+
 def changelog_added_lines(repo: Path, rng: str, candidates: Iterable[str] = ("CHANGELOG.md", "CHANGELOG", "changelog.md", "HISTORY.md")) -> str:
     for name in candidates:
         exists = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"HEAD:{name}"], capture_output=True)
@@ -553,7 +610,8 @@ def resolve_tag(repo: Path, version: str, formats: list[str]) -> tuple[str | Non
 
 
 def assess_upstream(cache: RepoCache, template: dict[str, Any], template_dir: Path, spec: dict[str, Any],
-                    defaults: dict[str, Any], token: str | None, now: dt.datetime) -> UpstreamResult:
+                    defaults: dict[str, Any], token: str | None, now: dt.datetime,
+                    judge: judgments.Judge | None = None) -> UpstreamResult:
     repo_name = spec["repo"]
     res = UpstreamResult(name=spec["name"], repo=repo_name, template=template["name"],
                          pin_kind=spec.get("kind", "tag"), url=f"{GITHUB}/{repo_name}")
@@ -719,11 +777,30 @@ def assess_upstream(cache: RepoCache, template: dict[str, Any], template_dir: Pa
         else:
             # without a pin only the watched paths are meaningful, not the whole repository
             records = scan_commits(repo, [f"--since={lookback_days}.days", head], relevant_paths)
-        res.security_hits_total, res.security_hits = keyword_hits(records, "security")
-        res.breaking_hits_total, res.breaking_hits = keyword_hits(records, "breaking")
+        judged = None
+        if judge is not None and records:
+            try:
+                rng_args = [f"{res.pin_sha}..{head}"] if res.pin_sha else [f"--since={lookback_days}.days", head]
+                judged = judge.judge_commits(records, commit_files(repo, rng_args, None if res.pin_sha else relevant_paths))
+            except Exception as exc:  # noqa: BLE001
+                res.errors.append(f"commit judgments unavailable, keyword heuristics used instead: {exc}")
+        apply_judgments(res, records, judged)
 
     score_and_verdict(res, track_releases)
     return res
+
+
+def security_reason(res: UpstreamResult, since: str) -> str:
+    if res.judged_by:
+        extra = f" ({res.security_possible_total} more possible)" if res.security_possible_total else ""
+        return f"{res.security_hits_total} commit(s) {since} judged to be security fixes (Jev ≥ {judgments.SECURITY_YES}){extra}"
+    return f"{res.security_hits_total} commit(s) {since} mention security-related terms"
+
+
+def breaking_reason(res: UpstreamResult) -> str:
+    if res.judged_by:
+        return f"{res.breaking_hits_total} commit(s) judged to break existing deployments or need a manual step"
+    return f"{res.breaking_hits_total} commit(s) mention breaking changes, deprecations or migrations"
 
 
 def score_and_verdict(res: UpstreamResult, track_releases: bool) -> None:
@@ -740,7 +817,7 @@ def score_and_verdict(res: UpstreamResult, track_releases: bool) -> None:
                 reasons.append(f"{res.relevant_commits_total} commit(s) touched template-relevant paths")
             if res.security_hits_total:
                 score += 4
-                reasons.append(f"{res.security_hits_total} commit(s) mention security-related terms")
+                reasons.append(security_reason(res, "in the window"))
         res.score = score
         res.verdict = "unknown" if not res.activity_window_days else ("review" if score >= 3 else "minor-drift" if score else "up-to-date")
         res.reasons = reasons
@@ -770,7 +847,7 @@ def score_and_verdict(res: UpstreamResult, track_releases: bool) -> None:
 
     if res.security_hits_total:
         score += 4
-        reasons.append(f"{res.security_hits_total} commit(s) since the pin mention security-related terms")
+        reasons.append(security_reason(res, "since the pin"))
 
     if res.patched_file_commits_total:
         score += 3
@@ -782,7 +859,7 @@ def score_and_verdict(res: UpstreamResult, track_releases: bool) -> None:
 
     if res.breaking_hits_total:
         score += 1
-        reasons.append(f"{res.breaking_hits_total} commit(s) mention breaking changes, deprecations or migrations")
+        reasons.append(breaking_reason(res))
 
     if res.commits_ahead:
         score += min(res.commits_ahead // 25, 3)
@@ -827,8 +904,10 @@ def md_escape(s: str) -> str:
     return s.replace("|", "\\|").replace("\n", " ")
 
 
-def fmt_commit(res: UpstreamResult, c: CommitInfo, with_files: bool = True) -> str:
+def fmt_commit(res: UpstreamResult, c: CommitInfo, with_files: bool = True, tag: str | None = None) -> str:
     line = f"- [`{c.sha[:8]}`]({res.url}/commit/{c.sha}) {c.date} {md_escape(c.subject)[:110]}"
+    if tag:
+        line += f" *({tag})*"
     if with_files and c.files:
         line += "  \n  " + ", ".join(f"`{f}`" for f in c.files)
     return line
@@ -876,9 +955,23 @@ def render_upstream(res: UpstreamResult) -> str:
                 line += "\n" + textwrap.indent(r.notes, "  > ", lambda _: True)
             out.append(line)
         out.append("")
-    if res.security_hits:
+    if res.security_hits and res.judged_by:
+        hdr = f"Security fixes ({res.security_hits_total} judged ≥ {judgments.SECURITY_YES}"
+        if res.security_possible_total:
+            hdr += f", {res.security_possible_total} more possible"
+        out.append(hdr + "):")
+        out.extend(fmt_commit(res, c, with_files=False, tag=f"security {c.security:.2f}") for c in res.security_hits)
+        out.append("")
+    elif res.security_hits:
         out.append(f"Security-related commit messages ({res.security_hits_total}):")
         out.extend(fmt_commit(res, c, with_files=False) for c in res.security_hits)
+        out.append("")
+    if res.impact_hits:
+        shown = f", showing {len(res.impact_hits)}" if res.impact_breaking_total + res.impact_notable_total > len(res.impact_hits) else ""
+        out.append(f"Deployer impact ({res.impact_breaking_total} judged to break existing deployments, "
+                   f"{res.impact_notable_total} worth knowing{shown}):")
+        out.extend(fmt_commit(res, c, with_files=False, tag=f"impact {c.impact:.2f}, confidence {c.impact_confidence:.2f}")
+                   for c in res.impact_hits)
         out.append("")
     if res.patched_file_commits:
         out.append(f"Commits touching files the template patches ({res.patched_file_commits_total}) — `{'`, `'.join(res.patched_files)}`:")
@@ -907,10 +1000,13 @@ def render_report(date: str, manifest: dict[str, Any], results: dict[str, list[U
                   previous: dict[str, Any] | None, template_meta: dict[str, dict[str, Any]]) -> str:
     templates = manifest["templates"]
     out = [f"# Template update assessment — {date}\n"]
+    judged_models = sorted({r.judged_by for rs in results.values() for r in rs if r.judged_by})
     out.append(f"Generated by `scripts/assess_template_updates.py` from [`templates.yaml`](../templates.yaml). "
                f"{len(templates)} templates, {sum(len(v) for v in results.values())} upstream projects. "
                "Verdicts compare the version each template pins with the upstream default branch and releases; "
-               "see [scripts/README.md](../scripts/README.md) for the scoring rules.\n")
+               "see [scripts/README.md](../scripts/README.md) for the scoring rules."
+               + (f" Security and deployer-impact judgments by TypeSafe `{'`, `'.join(judged_models)}`." if judged_models
+                  else " Security and breaking-change signals come from keyword heuristics (no `TYPESAFE_API_KEY`).") + "\n")
 
     counts: dict[str, int] = {}
     for t in templates:
@@ -962,7 +1058,8 @@ def render_report(date: str, manifest: dict[str, Any], results: dict[str, list[U
                     bits.append(f"new upstream release {r.latest_release}")
                 elif (r.commits_ahead or 0) > (p.get("commits_ahead") or 0) and r.pin_sha == p.get("pin_sha"):
                     bits.append(f"+{r.commits_ahead - (p.get('commits_ahead') or 0)} upstream commit(s)")
-                if (r.security_hits_total or 0) > (p.get("security_hits_total") or 0):
+                # counts are only comparable when both reports used the same method (regex vs Jev model)
+                if (r.security_hits_total or 0) > (p.get("security_hits_total") or 0) and p.get("judged_by") == r.judged_by:
                     bits.append("new security-related commit(s)")
                 if bits:
                     changes.append(f"- **{md_escape(t['name'])}** / {r.repo}: " + "; ".join(bits))
@@ -1023,6 +1120,8 @@ def main() -> int:
     ap.add_argument("--only", action="append", default=[], help="assess only templates whose name contains this (repeatable)")
     ap.add_argument("--no-refresh", action="store_true", help="do not fetch upstreams that are already cached")
     ap.add_argument("--summary", default=os.environ.get("GITHUB_STEP_SUMMARY"), help="also append the summary table to this file")
+    ap.add_argument("--no-judgments", action="store_true",
+                    help="use the keyword heuristics even when TYPESAFE_API_KEY is set (same as TEMPLATES_JUDGMENTS=off)")
     args = ap.parse_args()
 
     manifest = yaml.safe_load(Path(args.manifest).read_text(encoding="utf-8"))
@@ -1036,6 +1135,12 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     now = dt.datetime.now(dt.timezone.utc)
     cache = RepoCache(Path(args.cache_dir), refresh=not args.no_refresh)
+    judge: judgments.Judge | None = None
+    if judgments.enabled() and not args.no_judgments:
+        judge = judgments.Judge(os.environ["TYPESAFE_API_KEY"], Path(args.cache_dir) / "judgments.json")
+        log(f"commit judgments: TypeSafe {judge.model} (cache {args.cache_dir}/judgments.json)")
+    else:
+        log("commit judgments: off, keyword heuristics in use (export TYPESAFE_API_KEY to enable)")
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1067,7 +1172,7 @@ def main() -> int:
         results[t["name"]] = []
         for u in t["upstreams"]:
             try:
-                res = assess_upstream(cache, t, tdir, u, defaults, token, now)
+                res = assess_upstream(cache, t, tdir, u, defaults, token, now, judge)
             except Exception as exc:  # noqa: BLE001
                 log(f"  assessment failed for {u['repo']}: {exc}")
                 res = UpstreamResult(name=u["name"], repo=u["repo"], template=t["name"], pin_kind=u.get("kind", "tag"),
@@ -1075,6 +1180,9 @@ def main() -> int:
             results[t["name"]].append(res)
             log(f"  {u['repo']}: {res.verdict} (score {res.score})")
 
+    if judge is not None:
+        u = judge.usage
+        log(f"TypeSafe usage: {u['requests']} request(s), {u['input_tokens']} input tokens (~${u['input_tokens'] * 0.042 / 1e6:.3f})")
     report = render_report(args.date, manifest, results, previous, template_meta)
     data = {
         "date": args.date,

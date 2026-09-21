@@ -34,10 +34,12 @@ output to [`reports/`](../reports/):
      manifests, plus per-upstream extras such as `cognee-mcp/**`), with test
      code excluded,
    - commits touching files the template **patches** (rebase risk; Fabric),
-   - commit messages mentioning security advisories, CVEs, injection,
-     traversal and similar; dependency-bot commits count only when the title
-     names an advisory,
-   - commit messages mentioning breaking changes, deprecations or migrations,
+   - security fixes and deployer-impacting changes among the commits since the
+     pin. With `TYPESAFE_API_KEY` set these are **judged by TypeSafe Jev**
+     (see below); otherwise commit messages are matched against keyword
+     regexes (security advisories, CVEs, injection, traversal, …; breaking
+     changes, deprecations, migrations), which fire on website copy and miss
+     fixes whose message names no keyword,
    - PyPI's current version for pip-installed upstreams.
 4. Enriches newer releases with GitHub release notes when `GITHUB_TOKEN` is
    available, otherwise with annotated-tag messages and the CHANGELOG lines added
@@ -68,6 +70,31 @@ The heuristics are deliberately conservative about *what* to look at, not about
 not "bump blindly" (see the guide's §1 on why a version bump is not proof of
 compatibility).
 
+### Commit judgments (TypeSafe)
+
+[`judgments.py`](judgments.py) asks TypeSafe's System One model (`jev-1.13.0`,
+pinned) two questions about every commit since the pin, eight commits per
+request, standard library only:
+
+| Question | Type | Used as |
+|---|---|---|
+| Does the commit fix or harden against a security weakness? | probability | ≥ 0.8 counts as a security fix (+4 as before); 0.5–0.8 is listed as "possible" but not counted |
+| What does the change mean for someone running the software from a container with their own configuration? | 3-level score | ≥ 1.5 "breaks existing deployments / manual step" (+1, replaces the breaking-mention regex); 0.9–1.5 "worth knowing"; both listed under *Deployer impact* |
+
+Measured on the 21 Sep 2026 corpus (6,022 commits): the security regex had
+about 50% precision and caught 26 of the 87 commits Jev rated ≥ 0.8; the
+breaking-change regex was operator-relevant for about 30% of its hits. The
+whole corpus cost $0.18 and 87 seconds. Judgments are cached by sha in
+`<cache-dir>/judgments.json`, so a weekly run pays only for new commits.
+Score contributions are unchanged; only the inputs are.
+
+Enable by exporting `TYPESAFE_API_KEY` (a GitHub Actions secret of the same
+name in CI). Force the heuristics with `--no-judgments` or
+`TEMPLATES_JUDGMENTS=off`. If the API fails mid-run, the affected upstream
+falls back to the regexes and says so under *Problems*. Tests:
+`python3 -m unittest discover -s scripts -p 'test_*.py'` (add
+`TEMPLATES_LIVE_TESTS=1` for one real request).
+
 ### Running locally
 
 ```bash
@@ -76,6 +103,7 @@ python scripts/assess_template_updates.py                 # full run, writes rep
 python scripts/assess_template_updates.py --only fabric   # one template
 python scripts/assess_template_updates.py --no-refresh    # reuse cached clones in .cache/
 GITHUB_TOKEN=ghp_… python scripts/assess_template_updates.py   # with release notes
+TYPESAFE_API_KEY=… python scripts/assess_template_updates.py    # with Jev commit judgments
 ```
 
 Clones live in `.cache/` (git-ignored) and are reused between runs. A full cold

@@ -39,6 +39,10 @@ jobs:
       - name: Assess upstream projects
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional. When set, security and deployer-impact signals come from
+          # TypeSafe Jev instead of keyword regexes (scripts/judgments.py).
+          # A whole run is well under $1; without the secret the heuristics run.
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           # Passed through the environment rather than interpolated into the
           # script below. A ${{ }} expression inside run: is substituted before
           # the shell parses the line, so a crafted dispatch input would run as
