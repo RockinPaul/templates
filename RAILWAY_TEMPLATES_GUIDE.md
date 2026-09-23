@@ -1994,7 +1994,7 @@ prompted for nothing.
 
 **Plugins are why there is a volume.** Marmot installs 31 connector plugins from `ghcr.io` at every
 startup, roughly 800 MB, with no setting to narrow the list, so the first boot takes minutes —
-`healthcheckTimeout` is 900 in `railway.json` for that reason. `MARMOT_PLUGINS_DIR=/data/plugins`
+`healthcheckTimeout` is 900 for that reason — in the template definition since 2026-09-23 via a change set; it had lived only in `railway.json`, which new services do not read (§4), so one-click copies had shipped the 300 s default. A fresh copy afterwards showed the instance at 900 and `[1/1] Healthcheck succeeded!`. `MARMOT_PLUGINS_DIR=/data/plugins`
 moves the cache onto the volume and turns it into a one-time cost; `MARMOT_PLUGIN_CACHE_DIR` defaults
 to `<plugins>/cache`, so that one variable moves both. The catalog itself — assets, lineage, glossary,
 teams, users, API keys — lives entirely in Postgres, so 1024 MB volumes are generous on both services.
