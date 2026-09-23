@@ -254,7 +254,7 @@ Per template: a memory note with ids (project, environment, services, volumes, t
 - `railway variables --service X -e production --set K=V --skip-deploys`; `--json` to read (from the linked dir).
 
 **Builds and deploys**
-- Connecting a repo triggers a build. Unfiltered sources can rebuild on any push; explicit per-service watch patterns prevent documentation-only updates from restarting unrelated workloads. Verify that those patterns survive template generation.
+- Connecting a repo triggers a build. Unfiltered sources rebuild on any push; per-service watch patterns on the reference project's service instances stop documentation-only commits from restarting unrelated workloads. The template cannot carry them, and deployers' copies do not read `railway.json` (see Templates below).
 - Restart policy default `ON_FAILURE`, 10 retries. A service that crashes while a database is still initialising can exhaust them; add a wait loop or accept the retries.
 - Healthcheck: HTTP path only, on the private network; set `healthcheckTimeout` high (600 s) when migrations run before the port opens. gRPC-only services get no healthcheck.
 - Rollback starts the old image on the new schema; forward-only migrations then log errors (Multica). Don't promise rollbacks.
@@ -654,10 +654,11 @@ lightest shape here that still ships a UI, and it published with **zero composer
   `${{secret(48)}}` and `${{service.VAR}}` came through untouched. **The route to zero composer
   fields is therefore to bake constants into the image and delete the service variable**, then keep
   only generated secrets and cross-service references in the reference project.
-- **`healthcheckPath` in `railway.json` is not captured by generation.** railway.json applies at
-  deploy time; generation reads the service instance, which was still null. Set it explicitly with
-  `serviceInstanceUpdate` before generating, and keep railway.json too so deployers get it either
-  way (§5.16 records the same trap from the opposite direction).
+- **`healthcheckPath` in `railway.json` is not captured by generation.** Generation reads the
+  service instance, which was still null — and new services do not apply `railway.json` at all
+  (§4), so deployers never got it from the file either. Set it explicitly with
+  `serviceInstanceUpdate` before generating; that is the only route into the template (§5.16
+  records the same trap from the opposite direction).
 - **A degraded feature that never errors needs measuring, not assuming.** Without an embedding
   credential the store falls back to a `synthetic` provider that sums SHA-256 digests of tokens into
   a vector. It never raises. Measured: a query repeating a memory's own words scored 0.656 and
@@ -2153,7 +2154,7 @@ Variables / templates
 Repos / CLI
 - `railway add -r` "You do not have access" → `serviceConnect`; new repos may be "Not Authorized" for ~40 min.
 - `railway variables/logs/ssh` need the linked directory.
-- Without watch filters, every push can rebuild connected services. Copy explicit per-service watch patterns into the published template to avoid restarting user sessions for README edits.
+- Without watch filters, every push rebuilds connected services. The template cannot carry watch patterns and deployers' copies do not read `railway.json`; set them on the reference project's service instances so README edits do not restart its workloads.
 - Watch patterns cannot be carried by the template: a `deploy.watchPatterns` change-set applies and reads back null, but `deploy.healthcheckPath` through the same change-set **does** stick — a silent no-op is per-field, so read back after every patch. They only matter for a project that auto-deploys on push (a reference project); set them on its service instance. `railway.json` `build.watchPatterns` (repo-root relative, `["ok/**"]` for a service rooted at `/ok`) works only for legacy services and only until 2026-12-01; deployers' copies never read it. Prove it with a docs-only push — the reference project's deployments should report `SKIPPED`.
 - Keep project names short and abort after any failed `railway init`; confirm the exact intended linked project ID before template provisioning so a parent directory's link cannot receive the deployment.
 - Sub-agent reports can get lost; have them write files.
