@@ -1874,7 +1874,42 @@ returned `Wrote /data/workspace/...` and the very next search returned
 `counts: {vector: 0, keyword: 0, returned: 0}`. Nothing was wrong: a background `index_update_loop`
 job watches the workspace directories, so the note is searchable a moment later — the next poll
 returned it at score 1.1507. Worth stating in the listing, and worth remembering before "verifying"
-a write-then-read in one breath.
+a write-then-read in one breath. **But the watcher covers only `daily/` and `digest/`** (found
+2026-09-29): a `write` to any other path, `notes/…` for example, succeeds and is never searchable,
+with no warning anywhere. And the indexes live in memory and persist only on a graceful shutdown —
+which is one more reason the entrypoint's SIGTERM trap matters; a SIGKILL leaves the next boot
+re-indexing from the files.
+
+**Embeddings, switched on by the key (2026-09-29).** Upstream ships `components.as_embedding` and
+`components.embedding_store` commented out, so stock ReMe is BM25 + wikilinks. Enabling it takes
+**three** settings — those two maps plus `components.file_store.default.embedding_store: default`,
+which defaults to `""`; without the third the model is configured and never asked for a vector, again
+silently. Two traps shaped the mechanism:
+
+- **ReMe expands `${VAR}` only when it reads a config file, never in CLI `key=value` overrides.**
+  Dotted overrides *can* create the commented-out maps (`parse_dot_notation`), but a key passed that
+  way would sit in `ps`. So the image carries `/etc/reme/embeddings.yaml` (`extends: default` plus
+  the three settings as `${EMBEDDING_*}` placeholders), and the entrypoint adds
+  `config=/etc/reme/embeddings.yaml` only when `EMBEDDING_API_KEY` is non-empty. No key, stock
+  config, byte-for-byte the old boot.
+- **The variables stay out of the template definition** (an empty optional default is not
+  provisioned, above; a literal is nulled by generation). The listing documents them.
+
+Adding a key to a workspace that already has notes needs no code: ReMe's own backfill embeds the
+persisted chunks at start (`embedding backfill started: total=3` → filled in about a second), and
+vectors are cached per `vector_space_id` — a digest of backend, model, dimensions and endpoint — so a
+restart makes no API calls and a model or dimension change re-embeds once. A wrong key fails soft:
+the boot survives, keyword search works, semantic results are silently empty and the log fills with
+401 tracebacks. Verified in a one-click copy, first keyless (log "BM25 + wikilinks only", the
+semantic query returned nothing), then with the three variables set on the same volume: log
+"embeddings on - perplexity/pplx-embed-v1-0.6b (1024 dims) at openrouter.ai", `vector: 3`, and
+"why would a database engine refuse to initialise on a brand new disk" ranked the PGDATA note first
+with no shared words. **OpenRouter's `perplexity/pplx-embed-v1-0.6b` is the documented cheap
+option**: native 1024 dimensions (ReMe rejects any other length), accepts AgentScope's `dimensions`
+parameter, about $0.004 per million tokens. Its cosine scale sits far below `text-embedding-v4`'s
+(related pairs ≈ 0.4), which does not matter for search — results are fused by rank (RRF,
+`vector_weight` 0.7) — but does for proactive refresh's `known_threshold: 0.85`, calibrated for
+`text-embedding-v4@1024`.
 
 **Optional variables with an empty default are not provisioned at all.** `LLM_API_KEY` and
 `LLM_BASE_URL` were patched in as `isOptional: true` with `defaultValue: ""`, and the one-click
