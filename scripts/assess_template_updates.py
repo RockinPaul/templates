@@ -192,6 +192,19 @@ def is_prerelease(v: str) -> bool:
     return bool(PRERELEASE_RE.search(re.sub(r"^[vV]\.?", "", v)))
 
 
+def newest_release(tags: list[ReleaseInfo], pinned_is_pre: bool) -> ReleaseInfo:
+    """The release to report as "newest" from ``tags`` sorted by ``version_key``.
+
+    A pre-release pin follows the pre-release line, as the ``newer`` filter in
+    ``assess_upstream`` does; the newest stable tag would name Yao's 2023 v0.10.3
+    as "newest" for a v1.0.0-rc22 pin. A stable pin ignores pre-releases unless
+    there is nothing else.
+    """
+    if pinned_is_pre:
+        return tags[-1]
+    return ([t for t in tags if not t.prerelease] or tags)[-1]
+
+
 def days_between(a: dt.datetime, b: dt.datetime) -> int:
     return int((b - a).total_seconds() // 86400)
 
@@ -701,8 +714,7 @@ def assess_upstream(cache: RepoCache, template: dict[str, Any], template_dir: Pa
     pinned_is_pre = bool(res.pin_tag and is_prerelease(res.pin_tag)) or \
         bool(res.pin_tag and releases_api.get(res.pin_tag, {}).get("prerelease"))
     if tags:
-        stable = [t for t in tags if not t.prerelease] or tags
-        latest = stable[-1]
+        latest = newest_release(tags, pinned_is_pre)
         res.latest_release, res.latest_release_date = latest.tag, latest.date
     newer: list[ReleaseInfo] = []
     if tags and res.pin_sha:
