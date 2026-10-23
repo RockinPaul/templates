@@ -4,6 +4,7 @@ Weekly reports written by `scripts/assess_template_updates.py` (GitHub Actions, 
 
 | Date | Update recommended | Review | Minor drift | Up to date | Unknown |
 |---|---:|---:|---:|---:|---:|
+| [2026-10-23](2026-10-23.md) | 24 | 6 | 2 | 0 | 0 |
 | [2026-10-16](2026-10-16.md) | 26 | 2 | 3 | 1 | 0 |
 | [2026-10-09](2026-10-09.md) | 26 | 3 | 3 | 0 | 0 |
 | [2026-10-02](2026-10-02.md) | 23 | 5 | 4 | 0 | 0 |
