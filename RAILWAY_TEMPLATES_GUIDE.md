@@ -5,11 +5,11 @@ How to turn an open-source project into a one-click Railway marketplace template
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
 **Source guidance updated 2026-11-17.** Current notes include the initial 14 merges plus the merged
-Cognee, Laminar and Marmot upgrades. Orca's reviewed candidate is **unmerged pending approved live
-maintenance**; its main pin remains unchanged. Original dated deployment measurements remain
-historical evidence. The newer Linux/amd64 rehearsals below are local tests, not live Railway
-deployments or marketplace publication. Each dated assessment captures source pins and evidence
-at its generation time; later source changes do not revise those historical verdicts.
+Cognee, Laminar, Marmot and Orca upgrades. Original dated deployment measurements remain historical
+evidence. The newer Linux/amd64 rehearsals below are local tests; Orca’s separately identified Railway
+reference rollout is in §5.21. Neither source maintenance nor those tests republish marketplace
+definitions. Each dated assessment captures source pins and evidence at its generation time; later
+source changes do not revise those historical verdicts.
 
 ---
 
@@ -917,35 +917,52 @@ database before upgrading an actual deployment; a source/registry check does not
 
 ### 5.21 A desktop application run headless, and a volume that mounted but went unused (Orca)
 
-**Reviewed PR pending maintenance — not a merged upgrade.**
-[PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1), reviewed head
-`3b70df60b51ad3d15bec81e4fd03c43848f30e66`, targets 1.4.261; main still pins 1.4.245.
-Main triggers a live deployment, so do not merge before explicit rollout approval and old-wrapper
-preparation. Read-only deployment evidence confirms the old source commit `49bb63c…`, `ON_FAILURE`
-with 10 retries, one replica and `/` healthcheck (300 s). Check the effective control plane again at
-rollout time; do not assume a restart policy from a file.
+**Merged upgrade: 1.4.261.** [PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1)
+merged reviewed head `3b70df60b51ad3d15bec81e4fd03c43848f30e66` as
+`acb477630b475883562e133ddeec24721cc2173f`. Main triggers the reference service’s deployment;
+merging an update is therefore a rollout action even when there are no active users.
 
-The candidate runs foreground plain-Node `orcad` without `xvfb-run` between Tini and the CLI.
-Normal stop exited 0 and released the upstream lock; a no-fork kernel profile lock refused a second
-updated container across PID namespaces (exit 75). No foreign-lock deletion or persisted machine-id
-workaround is added. This does not retrofit shutdown of the old running wrapper: verify its recorded
-machine identity, boot ID, PID command and start ticks, obtain clean exit/lock release, and validate
-the whole-volume backup plus original image **before** any merge-triggered deployment. `ON_FAILURE`
-clean-exit maintenance and a separate explicit `ALWAYS` hold were rehearsed locally; live maintenance
-is not authorized or performed. The [candidate runbook](https://github.com/RockinPaul/orca_railway_template/blob/update/2026-11-17/README.md#first-upgrade-from-the-old-wrapper)
-is the concrete preparation/rollback reference while the PR remains open.
+The wrapper runs foreground plain-Node `orcad` without `xvfb-run` between Tini and the CLI.
+Local Linux/amd64 normal stop exited 0 and released the upstream lock; a no-fork kernel profile lock
+refused a second updated container across PID namespaces (exit 75). No foreign-lock deletion or
+persisted machine-id workaround is added. This does not retrofit shutdown of an old running wrapper:
+verify its recorded machine identity, boot ID, PID command and start ticks, obtain clean exit/lock
+release, and validate a whole-volume backup plus the original image **before** the first upgrade.
+Follow the [first-upgrade and rollback runbook](https://github.com/RockinPaul/orca_railway_template/blob/main/README.md#first-upgrade-from-the-old-wrapper).
+`ON_FAILURE` clean-exit maintenance and a separate explicit `ALWAYS` hold were rehearsed locally.
+The reference source, service and effective manifest agree on `ON_FAILURE`, 10 retries and one replica.
 
-The local Linux/amd64 matrix used exact old persistence APIs for synthetic 100-turn/300-item,
+The populated local Linux/amd64 matrix used exact old persistence APIs for synthetic 100-turn/300-item,
 empty and queued-only fixtures; real old/new packages performed import and paginated paired reads.
 The old pairing, first/final content, queued draft and file/settings state survived. After an old-layer
 turn 101 write, re-upgrade kept the original 300 items and a separate 303-item continued history;
 queue-reopen tombstones also produced a recovered queue variant. Normalized seven record IDs/names
-and four source receipts stayed stable on repeat start. Untouched whole-volume backup restore with the
-original image recovered the old state. No paid agent, browser/provider re-authentication or live
-rollout is claimed. Both target package hashes were verified; runtime tests were amd64.
+and four source receipts stayed stable on repeat start; this does not assert byte equality of the raw
+diagnostic captures. Untouched whole-volume backup restore with the original image recovered the old
+state. Both target package hashes were verified; runtime tests were amd64. No paid agent,
+browser/provider re-authentication or production fixture writes were performed.
 
-The original wrapper observations below are historical/current-main context, not a claim that the
-reviewed candidate is deployed or still needs its old virtual-display wrapper.
+The approved reference rollout used native warm and prepared quiescent backups, verified through
+fresh native backup-catalog entries with provider snapshot IDs. `workflowStatus` returned `Not Authorized`
+after credential refresh; no `Complete` status is claimed. Incremental copy-on-write backups can report
+zero used MB without being empty. After verified old-owner graceful shutdown, a temporary fixed HTTP
+maintenance process opened no Orca/profile database and allowed lock-absence and data-hash checks.
+A cached-image redeploy reused its old configuration, so the override required a fresh deployment of
+the exact old commit. Setting `startCommand: null` was a no-op; an empty string cleared the next-launch
+override. Read back the effective deployment manifest and actual process, not just mutation success.
+
+Reference deployment `35408173-e6e7-4214-bc99-b86b31a7d945` is successful at the merge above, with
+`Starting Healthcheck` in its build log, `/` healthcheck and cleared maintenance command. The actual
+process reports 1.4.261. The same `/data` volume retains one profile, two device credentials, pairing
+key and legacy JSON hashes; an existing paired credential authenticated over public WSS for read-only
+`settings.get`. This reference had no chat store before upgrade. The new store contains no chats/items,
+only schema metadata; two additive document-part tables are empty. Profile documents/meta retain row
+counts but their whole-row hashes changed; tagged source defines additive storage and settings/UI
+normalization, so whole-schema/row equality is not claimed. The populated history and rollback proof
+comes from the separate local rehearsal, not this no-chat reference.
+
+**Historical original-wrapper observations.** The Electron/Xvfb details below describe the original
+wrapper and earlier measurements; current serve mode uses plain Node and the foreground wrapper above.
 
 Orca is an Electron agent development environment. Upstream ships desktop packages and a documented
 `orca serve` mode, no server image, and scopes Remote Orca Servers to a private network. The
@@ -2508,7 +2525,7 @@ not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
 | OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.89.7` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.15.6 and caddy 2.11.9 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields for browser OAuth; Google by default, other providers documented.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
 | tlbx | `tlbx` | tlbx (`mt` release binary v11.1.8 (.NET 11 Native AOT) + mise v2026.11.9 on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11.9 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy and there is no Docker. App previews now use the main origin; password login through Caddy needs no Local Connect pairing (§5.19) |
 | codeg | `codeg` | codeg (`xintaofei/codeg:0.45.0`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
-| Orca | `orca` | orca (`orca-ide` 1.4.245 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Reviewed [PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1) pending approved maintenance; main stays 1.4.245.** The candidate uses direct orcad shutdown and a kernel profile lock; its migration/runbook evidence is in §5.21. Original-wrapper context: **zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
+| Orca | `orca` | orca (`orca-ide` 1.4.261 checksum-verified `.deb` on `debian:13-slim`, plain-Node serve mode, home on a 5 GB `/data` volume) — **1 service, no gateway** | Merged [PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1); direct foreground shutdown plus a kernel profile lock. First upgrades from the old wrapper require verified graceful preparation and a whole-volume backup; see §5.21 for the populated local rehearsal and separate no-chat reference rollout. **Zero composer fields and no password**: Orca mints pairing credentials on first boot. The advertised address is `wss://$RAILWAY_PUBLIC_DOMAIN`, without a port; pairing authentication remains required. Set passwd home to `/data/home` when dropping privileges so replacement preserves identity. Historical Electron/Xvfb observations are retained in §5.21. |
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.7-rc.2 on `node:22`, Caddy 2.11.9 binary in the same container, mise v2026.11.9, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. The generated `DSH_GATE_PASSWORD` protects the public gateway; token redemption stays internal, inside the same guarded Caddy `route`. LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.8 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.18.0 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live registry starts empty after restart; recreate restores sessions but not RAM files, which need snapshot download/load; HTTP MCP uses the same bearer; script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |

@@ -247,7 +247,7 @@ templates:
   - name: Orca
     template_repo: RockinPaul/orca_railway_template
     deploy_url: https://railway.com/deploy/orca
-    notes: 'Reviewed PR https://github.com/RockinPaul/orca_railway_template/pull/1 is UNMERGED pending approved live maintenance; main remains the current assessed pin. The candidate adds direct foreground shutdown and a no-fork kernel profile lock. The old wrapper needs verified graceful preparation and a whole-volume backup before any merge-triggered deployment. Both architecture hashes move together. See guide §5.21; do not treat candidate rehearsal as a live upgrade.'
+    notes: 'Orca 1.4.261 merged via PR https://github.com/RockinPaul/orca_railway_template/pull/1; both architecture hashes verified. Foreground shutdown and a no-fork kernel profile lock protect replacement. First upgrades from the old wrapper still require verified graceful preparation, whole-volume backup and original-image rollback; do not delete foreign locks. Main triggers reference deployment. See guide §5.21 for populated local Linux/amd64 migration evidence and the separate successful no-chat Railway reference rollout; marketplace definitions are not republished by a merge.'
     upstreams:
       - name: orca-ide (.deb release artifact)
         repo: stablyai/orca
