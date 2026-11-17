@@ -4,6 +4,8 @@ How to turn an open-source project into a one-click Railway marketplace template
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
+**Source guidance updated 2026-11-17.** Current component notes and case-file pins reflect the 14 reviewed source merges. Original September/October deployment measurements (sizes, timings and one-click checks) remain historical evidence, not new tests of those pins. Mirage and tlbx have fresh Linux/amd64 container checks described below; no new Railway deployment or marketplace publication was performed.
+
 ---
 
 ## 1. The pattern in one page
@@ -427,6 +429,12 @@ Other EverOS specifics worth copying: upstream has no image, so `pip install "ev
 
 The one thing it got wrong is the one §5.32 later generalised: `==${EVEROS_VERSION}` pins EverOS, not what EverOS resolves. 1.3.1 declared `openai>=1.0.0` with no ceiling, so from 2026-09-24 every build installed the openai 3.x line upstream never tested; 3.19.2 failed every LLM and embedding call (`module 'httpx' has no attribute 'Timeout'`), 3.29.0 happened to work. Upstream's 1.4.1 pins `openai<3`, and the template moved to it on 2026-10-13 after an end-to-end check against an OpenAI-compatible stub and a 1.3.1 volume restarted under 1.4.1. A hash-pinned lock as in §5.32 is the durable fix.
 
+**Source update 2026-11-17:** EverOS 1.7.0 rejects unknown `[llm]` keys and invalid
+`EVEROS_LLM__*` names at startup; review custom configuration. Custom `[decider]` model settings
+belong under `[llm.decider]` (the old name warns). Keep the tokenizer unchanged unless planning a
+cascade rebuild. Baked wrapper fields were checked against tagged source; custom configs and an
+existing root were not rehearsed.
+
 ### 5.10 A many-service stack wired entirely by references (Notesnook, 6 services)
 
 Notesnook's sync server is MongoDB + MinIO + four app services (identity, sync, sse, monograph) that each need their own public domain and must all agree on shared hosts and secrets. The template deploys with **two optional inputs**; everything else is references baked at generation. The moves that got it there:
@@ -463,7 +471,7 @@ Recorded validation: **80 tests**, independent security review, real browser edi
 
 ### 5.13 A private persistent developer home with no web server (mise)
 
-[Persistent mise Workspace](https://github.com/RockinPaul/mise-railway-template) is one SSH-only service: pinned Debian 13 slim for **Linux/amd64**, mise **2026.10.24**, Node **24.21.0**, Python **3.13.15**, uv **0.12.11**, Bash/Git/tmux/build utilities and Tini. One `/root` volume starts at **5000 MB**; one replica, sleeping off, **2 vCPU / 2 GiB** limits and daily backups. These are caps, not a price or utilization promise. There are no public domains, SSH daemon, app secrets, database or browser IDE. Managed Railway SSH was verified as UID 0 with `/root` home: trusted container owner, not host root or multi-tenant isolation.
+[Persistent mise Workspace](https://github.com/RockinPaul/mise-railway-template) is one SSH-only service: pinned Debian 13 slim for **Linux/amd64**, mise **2026.11.9**, Node **24.21.0**, Python **3.13.15**, uv **0.12.11**, Bash/Git/tmux/build utilities and Tini. One `/root` volume starts at **5000 MB**; one replica, sleeping off, **2 vCPU / 2 GiB** limits and daily backups. These are caps, not a price or utilization promise. There are no public domains, SSH daemon, app secrets, database or browser IDE. Managed Railway SSH was verified as UID 0 with `/root` home: trusted container owner, not host root or multi-tenant isolation.
 
 - **Prebuild tools at their final prefix.** Install the locked starter runtimes under `/root/.local/share/mise` during the Docker build, then copy the complete tree—including hidden backend metadata—to `/opt/workspace-seed` outside the runtime mount. Restore to the same absolute prefix; Python sysconfig and virtual environments can contain absolute paths. Generate the global lock with `mise lock --global --platform linux-x64`; its filename is `.config/mise/mise.lock`, not `config.lock`. Use conservative precompiled x86_64 Python instead of accidental CPU-specific/source builds.
 - **Seed once without running owner content.** Require a real writable `/root` mount, use image-only startup PATH, publish a missing store through a temporary sibling plus atomic rename, and write the completion marker last. Preserve existing configs/dotfiles/symlinks and installed versions. Later boots neither execute profiles/project hooks nor reinstall removed tools. Reject unsafe/conflicting initialization paths instead of recursive repair. Image-managed mise and system utilities remain outside the volume for recovery.
@@ -472,6 +480,12 @@ Recorded validation: **80 tests**, independent security review, real browser edi
 - **Prove the persistence boundary.** Twenty-seven automated tests covered offline first boot/replacement and safety cases. Actual Railway reference and fresh-template redeploys preserved a project, venv and explicitly installed uv 0.12.10; `/tmp` and tmux processes disappeared. A snapshot restore recovered a changed file and the deliberately uninstalled extra uv version, which executed successfully without a reinstall. CLI/API restore created a detached volume; it had to be attached at `/root`, followed by waiting for the resulting deployment/SSH readiness. Retain the original volume until recovery checks pass, then recheck backup scheduling on the replacement.
 
 Initial IaC provisioning did not establish the reference's intended daily schedule; it was enabled and read back via the public backup API. The published template's explicit `backupSchedules: ["DAILY"]` did create a schedule in the fresh copy. Likewise, the running manifest did not expose `requiredMountPath`, so the entrypoint's mount check is the actual guard. Files under `/root` persist; manual OS package changes outside it and running processes do not. The [verification report](https://github.com/RockinPaul/mise-railway-template/blob/main/docs/VERIFICATION.md) and [linked usage overview](https://github.com/RockinPaul/mise-railway-template/blob/main/TEMPLATE_OVERVIEW.md) preserve the evidence and recovery instructions.
+
+**Source update 2026-11-17:** mise's new release verifies published npm provenance by default;
+packages without published provenance remain allowed unless a repository is pinned. Starter
+tool/seed versions are unchanged. Eight host config/owner-variable tests, locked config loading
+and the CI trust-refusal probe passed; the earlier Railway/backup checks above were not rerun.
+DSH and tlbx received the same mise/proxy maintenance, while DSH itself remains at 0.1.7-rc.2.
 
 ### 5.14 A Spring Boot app: environment beats the packaged config, and a zero-input template (HertzBeat)
 
@@ -622,6 +636,8 @@ Re-cut as a thin repo it is 228 KB and ten files — `Dockerfile`, `entrypoint.s
   patch that shrinks on a bump is the pattern working. **Updated 2026-11 (v1.4.557):** the patch
   applied unchanged with an 88-line offset, because v1.4.557 added a per-client lockout after
   repeated wrong keys above the hunk; read the landed hunk, not only `git apply --check`.
+  **Source update 2026-11-17:** v1.4.576 requires Go 1.26.10; the pinned tag/commit and toolchain
+  were advanced together, and the health patch still applies. Parallel MCP search remains opt-in.
 - **Staying current is a security argument, not housekeeping.** The v1.4.451 → v1.4.478 bump picked
   up two upstream fixes for free: `requireAPIKeyForBind` refuses a non-loopback bind with an empty
   API key, and `APIKeyMiddleware` compares SHA-256 digests in constant time. It also required Go
@@ -704,6 +720,13 @@ template therefore follows upstream's own documented recipe — three services, 
   upstream reaches for a cookie-issuing proxy rather than Basic auth. A two-service Basic-auth
   simplification looks obviously cheaper and quietly breaks collaborative editing — the UI survives,
   the socket does not.
+- **Google is a default, not a provider restriction.** The template README now documents
+  [other providers](https://github.com/RockinPaul/openknowledge_railway_template/blob/main/README.md#using-a-provider-other-than-google),
+  including GitLab/OIDC issuer, client credentials and group/email restrictions. Keep the
+  `/oauth2/callback` redirect aligned with the gateway domain. These are operator configuration
+  choices; no new required composer fields or actual identity-provider login were introduced/tested.
+  Use an absolute GitHub link in a Railway-published overview: a relative README link resolves
+  against the marketplace page rather than the repository.
 - **A silent start/stop cycle with clean logs is a port mismatch, not a crash.** oauth2-proxy
   listens on `[::]:4180` by default, which upstream's recipe keeps. On Railway that deployed, logged
   a normal startup, then "Starting Container / Stopping Container" with **no error line anywhere**,
@@ -773,9 +796,10 @@ occurrence of "docker" in its README or its 3234-line installer.
   answers: **401 unauthenticated, 403 origin refused, 400 origin accepted but handshake incomplete**.
   Chasing "403" alone produced two wrong theories (a stripped port, then a scheme mismatch). The
   moment 403 turned into 400, the cause was proven without reading another line of source.
-- **Verify a WebSocket with a real client, not curl.** curl can reach 101 on a bare upgrade but
-  cannot complete these handshakes, so it reports 400 where a browser succeeds. A ~25-line Node
-  script using `https.request` and its `upgrade` event gives a true 101 plus the first server frame.
+- **Verify a WebSocket by running a terminal command.** An upgrade and a first state frame alone
+  do not prove the terminal works. The 2026-11-17 Linux/amd64 check sent a binary mux input frame
+  through Caddy and received terminal output containing a generated marker, also confirmed in a
+  shell-created file. Anonymous connections returned 401 and cross-origin connections 403.
 - **A workstation needs its writable paths on the volume, or it is a toy.** Anything `apt-get`
   installs at runtime is gone on the next redeploy; only the volume survives. So `HOME`,
   the npm global prefix and mise's data directory all live there, which is what makes
@@ -785,11 +809,19 @@ occurrence of "docker" in its README or its 3234-line installer.
 - **`/etc/profile` rebuilds `PATH` and discards the image `ENV`.** A login shell therefore lost the
   shims that every other shell had. The app spawns plain bash so its terminals were unaffected,
   which is exactly the kind of gap that ships unnoticed; a `/etc/profile.d` snippet closes it.
-- **Some upstream features cannot survive the platform, and the listing must say so.** App preview
-  serves from `PORT + 1` and hands the browser `scheme://<your host>:8081`, which Railway's edge
-  never answers, with no setting to override the origin. Containers are not privileged, so nothing
-  inside can run Docker. Both were verified rather than assumed — the container really does listen
-  on 8081 — and both are written into the overview.
+- **Recheck platform limitations on an upgrade.** The original v10 preview used `PORT + 1`,
+  which Railway's edge could not reach. In v11.1.8 previews share the main listener and derive
+  their origin from the request's scheme/Host/port; the Linux/amd64 test fetched local preview
+  HTML through Caddy on that same port. Docker inside the box remains unavailable because Railway
+  containers are not privileged. Local Connect is optional; ordinary password login needs no pairing.
+- **The release bundles its runtime.** v11.1.8 is .NET 11 Native AOT: install the complete archive
+  (`mt`, `mthost`, `mtagenthost`) rather than a separate .NET runtime. Both Linux archive SHA-256s
+  matched GitHub digests and the internal manifests passed. `mt` reports 11.1.8; the bundled helpers
+  report 11.1.7. Passwords accept 10–1024 characters, hashed with PBKDF2-HMAC-SHA256 at 600,000
+  iterations. `TLBX_SETTINGS_DIR`, `--settings-dir`, `--generate-cert`, `--fingerprint` and
+  stdin-based `--set-password` still work. A replacement container on the same volume retained
+  files, password access and certificate fingerprint. Browser UI, paid providers and Railway were
+  not exercised in this upgrade check.
 - **Generate the password instead of asking for it.** `${{secret(48)}}` made this a zero-input
   template *and* removed its worst failure mode: a required password field on a service that is a
   shell invites someone to type something short. The one-click copy proved it, refusing the
@@ -803,7 +835,11 @@ codeg is a multi-agent coding workspace: a Rust server and a Next.js UI in one i
 volume. It took a fraction of the effort of §5.18 or §5.19, and the reasons are worth naming,
 because they are the checklist that predicts an easy template.
 
-- **Upstream published multi-arch images with version tags**, so the template is `FROM
+**Source update 2026-11-17:** 0.45.0 adds SQLite tables/backfill through upstream migrations.
+The migration source was reviewed, but no existing-database upgrade was rehearsed. Preserve the
+database before upgrading an actual deployment; a source/registry check does not establish migration safety.
+
+- **Upstream published multi-arch images with version tags**, so the original template was `FROM
   xintaofei/codeg:0.30.7` and nothing else. No source build, no release-tarball unpacking, no
   per-arch case statement. Check Docker Hub and GHCR before assuming you must build (§3.1).
 - **It speaks plain HTTP on a configurable port**, which is exactly what Railway's edge wants, so
@@ -1082,13 +1118,20 @@ reimplemented: the cookie is still minted by DSH with its own secret.
 ### 5.23 A daemon that exits when idle, binds one address family, and fences Host before health (Mirage)
 
 Mirage is a virtual terminal for AI agents: a FastAPI daemon that owns "workspaces" — a virtual
-filesystem over mounted resources (S3/R2/GCS, Postgres/Mongo/Redis, Notion/Slack/Gmail…) with an
-in-process bash-like shell and git-style versioning — and exposes them over `/v1/*`. Upstream
+filesystem over mounted resources (S3/R2/GCS, Postgres/Mongo/Redis, Notion/Slack/Gmail…) with a
+bash-like shell, session state and downloadable snapshots — and exposes them over `/v1/*`. Upstream
 publishes it as a PyPI package (`mirage-ai`), documents a shared-daemon `token` auth mode, and
 leaves `/v1/health` open for probes. That passes the screening heuristic's third clause; it is
 also the first candidate in this guide that is a *backend agents call* rather than a workstation.
-One service, zero required fields. Four findings, each of which would have shipped a broken
-template if assumed rather than measured.
+One service, zero required fields. The original deployment findings below are retained with
+the changed 0.0.8 contracts and fresh Linux/amd64 checks from 2026-11-17.
+
+- **Use the matching client and mount schema.** Install `mirage-ai==0.0.8`; a YAML mount is
+  `/: {vfs: ram, mode: exec}`, not `resource: ram`. Use `mirage shell -w demo -c 'echo hi'`
+  or `POST /v1/workspaces/demo/shell` with `{"command":"echo hi"}`. The old execute/jobs APIs
+  and workspace commit/checkout examples no longer apply. Background work uses `command &`,
+  `jobs`, `wait` and `kill` inside a session. CLI file operations, Python, QuickJS and background
+  execution all passed with credentials on a fresh root-owned volume with `lost+found`.
 
 - **Railway's health probe sends `Host: healthcheck.railway.app`.** The daemon validates `Host`
   *before* authentication, health check included, and an explicit `MIRAGE_ALLOWED_HOSTS` list
@@ -1112,17 +1155,20 @@ template if assumed rather than measured.
   "never". The template bakes ten years (`315360000`; asyncio accepted it and a delete left the
   daemon serving) and sets `restartPolicyType: ALWAYS` so even that eventual exit is a restart,
   not an outage. **Read a daemon's idle/exit semantics before hosting it as a service.**
-- **Live workspaces are not reloaded after a restart; commits are.** The registry is an in-memory
-  dict; `state/`, `repos/` and `snapshots/` under `MIRAGE_HOME` persist on the volume. After
-  replacing the container `GET /v1/workspaces` was `[]`, but recreating the workspace by id and
-  `POST …/checkout {ref}` on the committed version brought `/hi.txt` back. The listing says
-  "commit before you redeploy; uncommitted RAM state is gone" rather than "persistent
-  workspaces".
+- **Session persistence is not RAM-file persistence.** In 0.0.8 the daemon supplies a disk store
+  at `MIRAGE_HOME/state` unless the config supplies its own. Close/recreate and container replacement
+  on the same volume restored session directory and exported variables; RAM files were absent.
+  The live registry still starts empty: recreate with the same id/config. `workspace close` keeps
+  session state; `workspace delete` removes it. Download `mirage workspace snapshot demo demo.tar`
+  before stopping, then `mirage workspace load demo.tar --id restored` to recover RAM files
+  (tested). This template has no S3 snapshot store for `--key`. The older 0.0.6 commit/checkout
+  recovery measurement does not describe the current API.
 - **Script runtimes need an `exec`-mode mount, and JavaScript needs a module the package does not
   ship.** On a `mode: write` mount `python -c` and `node -e` both fail with `root mount '/' is not
-  in EXEC mode` (exit 126). On `mode: exec`, Python runs in-process on Monty; `node` fails with
+  in EXEC mode` (exit 126). In 0.0.8 the default runtime list is `monty`, `quickjs`, `workspace`;
+  Python runs in Monty's pooled worker subprocesses. `node` fails with
   `the quickjs runtime needs a qjs-wasi.wasm module` until the quickjs-ng WASI build is present and
-  `MIRAGE_QUICKJS_HOME` points at its directory. The image pins `qjs-wasi.wasm` v0.16.2 by digest
+  `MIRAGE_QUICKJS_HOME` points at its directory. The image pins `qjs-wasi.wasm` v0.18.0 by digest
   under `/opt/quickjs` — `node -e "console.log(6*7)"` → `42`. **Test each advertised runtime, not
   the first one.**
 - **Fail closed on the token.** Upstream's default `local` mode mints a token into a file a
@@ -1133,8 +1179,12 @@ template if assumed rather than measured.
 - **Not wrapped: the FUSE sandbox.** Upstream's only Dockerfile is a FUSE host needing `SYS_ADMIN`
   and `/dev/fuse`, which Railway does not grant; the daemon does not need it (the shell is
   virtual — no `uname`, no `/etc/passwd`, but `curl` and `git` are Mirage's own commands over the
-  VFS). MCP is stdio-only, so no network pairing with DSH (§5.22) — a stdio child beside the agent
-  would be the route.
+  VFS). Version 0.0.8 also serves HTTP MCP at `/v1/workspaces/ID/mcp` with the same bearer token;
+  a reviewer verified anonymous initialize 401, authenticated initialize 200, initialized 202 and
+  tools/list 200 with a tools result. `mirage mcp -w ID` remains a local stdio bridge. Shared-token
+  requests have no account identity or user isolation; JWT ownership rules do not apply to them.
+  Health, readiness and OAuth protected-resource discovery are public. This upgrade did not test
+  external provider backends, paid models, browser UI or a Railway deployment.
 - **Two harness slips worth recording.** A stale Python process on the Mac was already listening
   on the host port I mapped, answering every probe with `401 unauthorized` and `server: uvicorn` —
   indistinguishable from the daemon until `lsof -iTCP:<port>` named it; probe inside the
@@ -1150,6 +1200,11 @@ MCP tools, desktop and Android clients. Upstream publishes multi-arch images (`y
 production Dockerfile, and `yao start` on an empty directory installs its own application,
 migrates 28 tables into SQLite and creates a root user. The easy case (§5.20) — until the boot log
 prints `Email: root@yaoagents.com / Password: Yao123++`.
+
+**Source update 2026-11-17:** the pin is now stable 1.0.0, not rc22. The wrapper's initialization,
+root-password guard and relay remain unchanged. Upstream's tool-provider default is now `tao`;
+review custom settings using the former `cloud` name. The original initialized-volume/bcrypt
+measurements below were not rerun against 1.0.0.
 
 - **A first-boot root password that is a constant is the template's problem, not the deployer's.**
   The bundled `scripts/setup.ts` has `ROOT_USER_PASSWORD = "Yao123++"` hard-coded; every
@@ -1423,6 +1478,10 @@ commands, so the blast radius of the URL is a shell.
 
 ### 5.27 A scratch image with no shell, and the first Go service that needed no relay (Coddy)
 
+**Source update 2026-11-17:** keep custom config at `CODDY_HOME/config.yaml`; the new release no
+longer falls back to a workspace `config.yaml`. Both password and bearer guards remain required;
+TOTP remains optional. The upgrade did not include a container/browser sign-in rehearsal.
+
 [Coddy](https://github.com/coddy-project/coddy-agent) (MIT, ~145 stars but several releases a day —
 1.1.32 landed during the build) is a general-purpose agent in one static Go binary: a web UI, an
 OpenAI-compatible `/v1/*` API, a `/coddy` REST surface, a cron scheduler, a swarm relay and a remote
@@ -1693,6 +1752,12 @@ form. A clean SIGTERM exits 0, so `ALWAYS`.
 
 ### 5.31 The relay was the danger, not the bind (QwenPaw)
 
+**Source update 2026-11-17:** channels move to plugins, and the legacy workspace ZIP APIs are
+removed in favor of Backup & Restore. Optional Data app compatibility and channel flows were
+reviewed in source, not run: the bundled Data manifest still declares 2.2.2 and older unscoped
+sessions can remain on disk but disappear from its new listing. The original auth/bind tests below
+remain historical evidence; they were not relabeled as v2.3.0 tests.
+
 [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (Apache-2.0, ~35k stars) is a self-hosted
 personal assistant: a web console with chat, long-term memory, skills, a plugin system, browser
 automation against a real Chromium, and an agent that runs shell commands. Upstream publishes a
@@ -1823,7 +1888,10 @@ It breaks two assumptions the previous thirty templates were all built on.
 docs — ReMe ships as a pip package for local use. Every other template in this portfolio pins an
 artefact that upstream built and tested; here `pip install` is a *resolution*, so the same pin would
 produce a different image next month. The answer is a hash-pinned lockfile: `uv pip compile
-requirements.in --generate-hashes` produced 149 packages, and the image installs with
+requirements.in --generate-hashes` originally produced 149 packages (September 2026). The
+2026-11-17 source update to reme-ai 0.4.2.2 regenerated a 142-package hashed lock; reme-studio
+stays at 0.1.1. Installation with `--require-hashes`, `uv pip check` and both imports passed;
+full job/MCP/Studio and existing-workspace flows were not rerun. The image installs with
 `pip --require-hashes`, which refuses anything whose artefact does not match. Generate the lock **on
 the deploy architecture** — `docker run --platform linux/amd64` — for the same reason §5.31 exists.
 **Generalises: when the upstream artefact is a resolution rather than a build, the lockfile is the
@@ -2321,38 +2389,49 @@ Docs
 
 ## 8. Case files
 
+Source versions below are current as of the 2026-11-17 merges. Image sizes, boot timings and
+original Railway verification claims remain dated historical measurements unless explicitly
+retested in the component notes; updating a source pin does not republish the marketplace listing.
+
+Multica's v0.10.0 backend applies forward-only migrations 595–660; preserve/restore the database
+when planning an actual upgrade or rollback. Legacy anonymous local-file entry points are disabled;
+use authenticated attachment routes. Optional GitHub App setup now also needs
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`, with the backend callback at
+`https://YOUR-BACKEND-DOMAIN/api/github/setup`. Migrations and attachment access were source-reviewed,
+not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
+
 | Template | Code | Services | Key decisions and lessons |
 |---|---|---|---|
 | Cognee AI Memory Platform with MCP | `cognee-ai-memory-p-1` | cognee-api (`cognee/cognee:1.6.6`), cognee-mcp (`main-df2b4fa`, the 1.6.6 release commit, http `/mcp`), Postgres | MCP 421 fixed with the DNS-rebinding flag; `EMBEDDING_API_KEY=${{LLM_API_KEY}}`; personal instance later switched to cheaper OpenRouter models; the old README code `SKKN1Y` was dead; 1.6.4 no longer signs tokens with the public `super_secret`, so a deployment with auth on needs `FASTAPI_USERS_JWT_SECRET` or every restart invalidates tokens |
-| Multica | `multica` | frontend (Next.js), backend (Go, `/readyz`, uploads volume), pgvector | Turned a stale fork into a thin wrapper over `ghcr.io/multica-ai/*` (v0.4.41, now v0.7.2 with `DO_NOT_TRACK=true` baked in because v0.4.44's deployment telemetry ignores `ANALYTICS_DISABLED`); `RESEND_API_KEY=" "` default broke login (500) — blank optional defaults; realtime works through the frontend proxy despite upstream docs; rollback logs schema errors; v0.6.3 closes a removed member's realtime socket (on v0.6.2 it kept receiving the workspace's events, reproduced) |
+| Multica | `multica` | frontend (Next.js), backend (Go, `/readyz`, uploads volume), pgvector | Turned a stale fork into a thin wrapper over `ghcr.io/multica-ai/*` (v0.4.41, now v0.10.0 with `DO_NOT_TRACK=true` baked in because v0.4.44's deployment telemetry ignores `ANALYTICS_DISABLED`); `RESEND_API_KEY=" "` default broke login (500) — blank optional defaults; realtime works through the frontend proxy despite upstream docs; rollback logs schema errors; v0.6.3 closes a removed member's realtime socket (on v0.6.2 it kept receiving the workspace's events, reproduced) |
 | projectmem | `projectmem` | projectmem (Python, volume `/data`) | No upstream image: `pip install projectmem==0.3.4 mcp==2.2.0`; stdio-only tool wrapped in a Starlette Streamable-HTTP app with bearer auth; entrypoint registers projects idempotently; `serviceConnect` instead of `railway add -r` |
 | gortex | `gortex` | gortex (Go binary v0.64.11, cosign-verified checksums, XDG dirs on `/data`), web (Next.js behind Caddy basic auth) | Default repo = gortex's own; `GORTEX_TOOLS=readonly`; socket/pid in `/tmp`; Caddy injects the daemon token so the browser never sees it; from v0.64.8 the daemon 403s any browser `Origin`, so Caddy refuses cross-site `/v1` requests itself and strips `Origin` from same-origin ones; `/healthz` proxied to Node; repo connection lag |
 | Observal | `observal` | web (nginx), api + worker (same image, role switch, `observal-*:1.15.1`), Postgres 18 (Railway), ClickHouse (upstream tuning), Redis | uvicorn dual-stack bind; XFF edge-hop strip; websocket origin patched in the bundle at start (1.15 builds it from the page origin, so the guard that refused to start without the old line had to go or the UI would crash-loop; `/.well-known/ard.json` routed to the API); api starts as root only to hand the key volume to `appuser` (HOME!); seeded demo accounts with generated passwords; Data Migration screen unsupported (needs shared volume); `observal doctor patch --all-harnesses`; 1.15.1 turns vendor usage reporting on and its migration erases stored choices, so the entrypoint stores "off" when none is stored (`USAGE_PING_DEFAULT=off`) |
 | WeKnora | `weknora` | frontend (nginx, v0.9.0-tag config), app (Go, `[::]`, Postgres wait), docreader (gRPC, inline images), ParadeDB (v0.25.11), Redis | Config from the release tag, not main; `SERVER_HOST=[::]`; Redis `rmdir lost+found`; no `PG*` aliases on ParadeDB; forwarded-proto/for maps for OIDC and client IPs; bootstrap admin by email + redeploy; rename before publish; v0.8.2 nginx ports: fail-closed `/embed/` `auth_request`, internal local-browser RPC 404s at the edge, `/mcp/` proxied; v0.8.3 moves ParadeDB to v0.25.11 (v0.22's pgvector/pg_search crash-loop on large imports), an image setting outside the repo, and the extension catalog must follow the image (image first and migration 115 does it, otherwise `ALTER EXTENSION … UPDATE` by hand) |
-| EverOS | `everos` | everos (python:3.12-slim + `everos[multimodal]==1.5.1` from PyPI, Caddy 2.11 in the same container, volume `/data`) | No upstream image and no auth: Caddy bearer gate on `PORT`, app on private `:8000` for the header-less official plugins; token charset/length validated (Caddy matcher wildcards); fail-fast on the LLM key; `everos init` on cold start despite docs; zombie-aware Caddy watchdog (PID 1 does not reap); `EVEROS_API__HOST=` for dual-stack; `file://` reads fenced to `/data/uploads`; keyword search until embeddings exist; cover committed to the repo because upstream's banner is a user-attachment |
+| EverOS | `everos` | everos (python:3.12-slim + `everos[multimodal]==1.7.0` from PyPI, Caddy 2.11.9 in the same container, volume `/data`) | No upstream image and no auth: Caddy bearer gate on `PORT`, app on private `:8000` for the header-less official plugins; token charset/length validated (Caddy matcher wildcards); fail-fast on the LLM key; `everos init` on cold start despite docs; zombie-aware Caddy watchdog (PID 1 does not reap); `EVEROS_API__HOST=` for dual-stack; `file://` reads fenced to `/data/uploads`; keyword search until embeddings exist; cover committed to the repo because upstream's banner is a user-attachment |
 | Notesnook | `notesnook-sync-server` | mongo (7.0.12, single-node RS), minio (Silo + mc since 2026-11, MinIO's images having left Docker Hub), identity/notesnook-sync/sse (v1.0-beta.46)/monograph (streetwriters images) — 6 services, each built from its own `rootDirectory` | Every app on Railway's `PORT` 8080 (image `PORT` env is overridden); single-node Mongo advertises `localhost` + clients `directConnection=true` (else ReplicaSetGhost); thin wrappers bake the fixed constants so the composer is two optional fields; all wiring by references, shared secret + MinIO creds via `${{secret()}}`/service refs; presigned attachments against the public MinIO domain, data in `/data/s3`; verified with the real signup/token/attachment path |
 | Pipecat | `pipecat` | one Python 3.12.14 / Pipecat 1.8.1 service: session API, bot processes and bundled browser client; external Daily WebRTC; no database or volume | Password-protected, one active session/worker/replica; OpenAI/Gemini/Grok native voice, OpenRouter/Ollama STT–LLM–TTS; conditional key validation before paid room creation; short-lived room tokens and cleanup; Ollama endpoint is not bundled inference; readiness and mocked adapters are not live-provider proof (§5.11) |
 | OpenPencil | `openpencil` | public Caddy gateway, private digest-pinned v0.8.4 prerelease Rust web host, 1024 MB volume at `/data` | `admin` + generated password; one shared `/data/workspace.op`; File → Save persists, Save As exports, no autosave; exact origins and private control endpoints; browser-local AI keys, shared server credential snapshots disabled; 80 tests and real save/redeploy checks, no live AI-provider validation (§5.12) |
 | Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.3.2`, frontend healthcheck timeout 900 s), clickhouse-server 26.5, quickwit v0.9.1, postgres 16 — 5 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` cut seven services to four; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint refuses to boot without it; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok` (§5.15) |
 | HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.9.0`, Hibernate PostgreSQL dialect set by env), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
 | Fabric | `fabric` | one Go service built from pinned upstream source (no upstream image), volume at `/home/appuser/.config/fabric` | **Built from source without forking.** A 190 MB fork pinned 27 releases behind became a 228 KB repo whose Dockerfile clones a pinned tag, asserts that tag's commit so a moved tag fails the build, and applies a patch that began at 84 lines (`/health` plus its auth exemption, `text/readystream` → `text/event-stream`, CORS off hardcoded `localhost:5173`) and is now only `/health` — at v1.4.518 upstream took the other two, its CORS (`FABRIC_CORS_ORIGINS`) answers preflight before the key check where the old hunk 401'd it, and the key moved from `--api-key` to the environment; the bump to v1.4.478 brought two upstream security fixes and forced Go 1.26; Fabric reads providers from `~/.config/fabric/.env` not the process env, so keys land in plaintext on the volume; `railway.json` supplies the healthcheck the reference project lacked, and that reference project later vanished (§5.16) |
-| Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.10.24, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
+| Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.11.9, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
 | LongMemory | `longmemory` | longmemory (Node server, `/v1/*` + `/mcp`, SQLite on a `/data` volume) and dashboard (Next.js) — 2 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` prompted for nothing.** Pinned by commit SHA because the newest tag is 155 commits behind a `main` that reports a lower version, and the GHCR image is not public; `LONGMEMORY_HOST=::` gave Node a dual-stack socket with no socat needed; the dashboard entrypoint exports `HOSTNAME=::` because Railway injects it at run time; the server ships an EMPTY api key so the entrypoint refuses to boot without one; db in a `/data/db` subdirectory with a root chown then `gosu` drop; literal defaults (`PORT=8080`, `""`) were nulled into required fields by generation so constants were baked into the images instead; without an embedding key recall is lexical and `strict` mode can hide the matching memory (§5.17) |
-| OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.89.0` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.15.5 and caddy 2.11 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields, all Google OAuth.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
-| tlbx | `tlbx` | tlbx (`mt` release binary v10.22.0 + mise v2026.10.24 on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy, app preview cannot work (`PORT+1` origin), and there is no Docker — all three stated in the listing (§5.19) |
-| codeg | `codeg` | codeg (`xintaofei/codeg:0.41.3`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
+| OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.89.7` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.15.6 and caddy 2.11.9 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields for browser OAuth; Google by default, other providers documented.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
+| tlbx | `tlbx` | tlbx (`mt` release binary v11.1.8 (.NET 11 Native AOT) + mise v2026.11.9 on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11.9 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy and there is no Docker. App previews now use the main origin; password login through Caddy needs no Local Connect pairing (§5.19) |
+| codeg | `codeg` | codeg (`xintaofei/codeg:0.45.0`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
 | Orca | `orca` | orca (`orca-ide` 1.4.245 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
-| DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.7-rc.2 on `node:22`, Caddy 2.11 binary in the same container, mise v2026.10.24, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. Auth is the app's own (launch token → 30-day cookie, secret on the volume, so redeploys keep sessions). LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
-| Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.6 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.16.2 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live workspaces do not reload after a restart but commits do (recreate + `checkout`); script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
-| Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0-rc22` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
+| DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.7-rc.2 on `node:22`, Caddy 2.11.9 binary in the same container, mise v2026.11.9, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. The generated `DSH_GATE_PASSWORD` protects the public gateway; token redemption stays internal, inside the same guarded Caddy `route`. LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
+| Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.8 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.18.0 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live registry starts empty after restart; recreate restores sessions but not RAM files, which need snapshot download/load; HTTP MCP uses the same bearer; script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
+| Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
 | HolyClaude Workstation | `holyclaude-workstation` | holyclaude (`coderluii/holyclaude:1.6.8` upstream multi-arch image + one entrypoint, ~13 GB, state on a 5 GB volume at `/home/claude/.claude`) — **1 service** | `CLOUDCLI_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=3001` (nothing to type). Volume mounts at the app's own state directory because upstream refuses a symlinked durable root, and `/workspace` symlinks into it; the entrypoint registers the single CloudCLI account against a loopback-only instance before the public server starts (a background registration raced the healthcheck and lost), since upstream's first run is browser registration; `cd /` before replacing the inherited `WORKDIR`. Replaces a stale third-party `holyclaude` template that had no volume. AGPL-3.0 web UI over MIT glue (§5.25) |
 | Octop | `octop` | octop (`python:3.12-slim` + the released PyPI wheel installed with uv, socat relay, 996 MB, state on a 5 GB volume at `/data`) — **1 service** | `OCTOP_DEFAULT_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. The published wheel already carries the built React dashboard, so upstream's npm stage is skipped; **pip cannot install it at all** (`ResolutionTooDeep`) so uv is mandatory, and `evdev` needs a compiler at build time. uvicorn cannot bind dual-stack → socat. Upstream already randomises the admin password into `credential.txt`; the template supplies a secret instead so it shows in the Railway UI, and deliberately does **not** re-apply it on later boots. `railway.json`'s healthcheck read back null — set on the service instance instead (§5.26) |
-| Coddy | `coddy` | coddy (1.3.63; `alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. The Telegram gateway is included: the published image carries the `gateway` tag, contrary to the first listing (§5.27) |
+| Coddy | `coddy` | coddy (1.4.28; `alpine:3.22` + the static Go binary copied out of upstream's published `scratch` image, **57 MB**, state on a 5 GB volume at `/data`) — **1 service** | `CODDY_HTTP_PASSWORD=${{secret(24)}}` and `CODDY_HTTP_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. A scratch upstream has no shell, so the binary is copied out rather than the image inherited. Authentication is off by default upstream, so both gates are made mandatory and fail closed. **First Go service that needed no socat** — `-H ::` is genuinely dual-stack. `ALWAYS` restart because a clean SIGTERM exits 0. The Telegram gateway is included: the published image carries the `gateway` tag, contrary to the first listing (§5.27) |
 | PenguinHarness | `penguinharness` | penguin (`hiyouga/penguinharness:0.2.18` upstream multi-arch image used as-is, state on a 5 GB volume at `/data`) — **1 service** | `PENGUIN_SEED_ADMIN_PASSWORD=${{secret(24)}}` plus a prefilled `PORT=8080`. Upstream's own entrypoint already chowned only the top level of the data root and `exec setpriv`-ed in place, so the wrapper adds environment plus one guard and nothing else. Authentication is **on** by default — the hosted problem was the delivery channel: with no password configured the server prints a one-time claim link to the container log. Seeding happens only while no user exists, and the claim link returns while the password is still flagged initial, so rotating the variable leaves a way in rather than a lockout (all four states measured). Node binds dual-stack on `::` → **no socat**; `ALWAYS` because a clean SIGTERM exits 0. 0.2.15 stopped keyless gateway model rows from borrowing the vendor's env API key (it was sent to the gateway), and a failed claim link now redirects to login instead of 401 (§5.28) |
 | Scrumboy | `scrumboy-1` | scrumboy (`ghcr.io/markrai/scrumboy:3.40.3` upstream multi-arch image used as-is + curl/tini, **44 MB**, SQLite on a 5 GB volume at `/data`) — **1 service** | `SCRUMBOY_OWNER_PASSWORD=${{secret(24)}}` plus prefilled `PORT=8080`, `SCRUMBOY_OWNER_EMAIL` and `SCRUMBOY_PUBLIC_BASE_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}` (the reference survives generation; the literals did not). The Owner is whoever posts to `/api/auth/bootstrap` first and the API serves anonymous **reads and writes** until then, so the entrypoint claims it against a `127.0.0.1` listener before the public port opens, idempotent on 201/409 and fail-closed otherwise; **the race was run as a test** — 400 attacker attempts, zero wins. Password passed on stdin, absent from `ps` and logs. Encryption key is base64 of 32 bytes so `${{secret}}` cannot express it: generated on first boot onto the volume. Third no-socat Go service; `ALWAYS` because SIGTERM exits 0. Published as `scrumboy-1` because a third-party `scrumboy` with no variables or healthcheck already existed (§5.29) |
-| Trivy Server | `trivy-server` | trivy (`ghcr.io/aquasecurity/trivy:0.76.1` upstream multi-arch image used as-is, 179 MB, 1.3 GB vulnerability DB on a 5 GB volume at `/data`) — **1 service** | `TRIVY_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. **No browser surface at all** — `GET /` is a bare 404; the listing leads with the client command and points at `/version`. The token is mandatory because upstream's optional token is paired with a loopback default bind and their guidance for an exposed server is to set one; an empty token disables auth entirely (`token != "" && token != header`), and an open server lets a stranger write and delete shared cache entries other clients' scans depend on. Every setting arrives as a `TRIVY_*` env var so the token never enters `ps`. DB downloads **before** the listener opens (8 s cold, 3 s warm, 600 s timeout); exclusive cache lock so **single replica only**; `ALWAYS` because SIGTERM exits 0 (§5.30) |
-| QwenPaw | `qwenpaw-1` | qwenpaw (`agentscope/qwenpaw:v2.2.2` upstream multi-arch image, 2.84 GB, plus a thin wrapper; working, secret and backup dirs on a 5 GB volume at `/data`) — **1 service** | `QWENPAW_AUTH_PASSWORD=${{secret(24)}}`; the entrypoint refuses to boot unless `QWENPAW_AUTH_ENABLED=true` with a 12+ character password, including an explicit `false`. **No socat**: QwenPaw skips auth for loopback peers, so an in-container relay made `/api/skills` 200 instead of 401; upstream's `--host 0.0.0.0` is right because Railway's public edge reaches the container over IPv4 (a `::` patch got 502 on every path). Auto-registration is write-once, so editing the password variable rotates nothing (stated in the listing). Persona language defaults to `zh` and is fixed at first init, so the wrapper seeds `config.json` before running init itself. llama.cpp's `GLIBC_2.38` failure was arm64-only; on amd64 it loads. Healthcheck `/api/auth/status`; `ALWAYS` because SIGTERM exits 0. Published as `qwenpaw-1` because a stale `qwenpaw` (v1.1.0, no auth) existed (§5.31) |
-| ReMe | `reme` | reme (`reme-ai[core]==0.4.2.1` on `python:3.12-slim` from a hash-pinned `requirements.lock`, Caddy 2.11.4 in the same container, Markdown workspace on a 5 GB volume at `/data`) — **1 service** | **No upstream image and no upstream auth.** The lockfile is the artefact (`--require-hashes`, compiled on linux/amd64; `reme_studio` is unconstrained upstream). Caddy holds a bcrypt hash of `REME_PASSWORD=${{secret(24)}}` (piped on stdin) and is the only public listener, while ReMe keeps its default `127.0.0.1` bind; Caddy answers `/healthz` itself and `flush_interval -1` keeps MCP and SSE streaming. A placeholder `LLM_API_KEY` lets the keyless BM25 half boot (AgentScope builds the client eagerly); embeddings switch on with `EMBEDDING_API_KEY` through a config file, never CLI overrides. Only `daily/` and `digest/` are indexed, asynchronously. A SIGTERM trap gives `exit=0` (was 137) and persists the in-memory index; `ALWAYS` (§5.32) |
+| Trivy Server | `trivy-server` | trivy (`ghcr.io/aquasecurity/trivy:0.76.2` upstream multi-arch image used as-is, 179 MB, 1.3 GB vulnerability DB on a 5 GB volume at `/data`) — **1 service** | `TRIVY_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. **No browser surface at all** — `GET /` is a bare 404; the listing leads with the client command and points at `/version`. The token is mandatory because upstream's optional token is paired with a loopback default bind and their guidance for an exposed server is to set one; an empty token disables auth entirely (`token != "" && token != header`), and an open server lets a stranger write and delete shared cache entries other clients' scans depend on. Every setting arrives as a `TRIVY_*` env var so the token never enters `ps`. DB downloads **before** the listener opens (8 s cold, 3 s warm, 600 s timeout); exclusive cache lock so **single replica only**; `ALWAYS` because SIGTERM exits 0 (§5.30) |
+| QwenPaw | `qwenpaw-1` | qwenpaw (`agentscope/qwenpaw:v2.3.0` upstream multi-arch image, 2.84 GB, plus a thin wrapper; working, secret and backup dirs on a 5 GB volume at `/data`) — **1 service** | `QWENPAW_AUTH_PASSWORD=${{secret(24)}}`; the entrypoint refuses to boot unless `QWENPAW_AUTH_ENABLED=true` with a 12+ character password, including an explicit `false`. **No socat**: QwenPaw skips auth for loopback peers, so an in-container relay made `/api/skills` 200 instead of 401; upstream's `--host 0.0.0.0` is right because Railway's public edge reaches the container over IPv4 (a `::` patch got 502 on every path). Auto-registration is write-once, so editing the password variable rotates nothing (stated in the listing). Persona language defaults to `zh` and is fixed at first init, so the wrapper seeds `config.json` before running init itself. llama.cpp's `GLIBC_2.38` failure was arm64-only; on amd64 it loads. Healthcheck `/api/auth/status`; `ALWAYS` because SIGTERM exits 0. Published as `qwenpaw-1` because a stale `qwenpaw` (v1.1.0, no auth) existed (§5.31) |
+| ReMe | `reme` | reme (`reme-ai[core]==0.4.2.2` on `python:3.12-slim` from a hash-pinned `requirements.lock`, Caddy 2.11.9 in the same container, Markdown workspace on a 5 GB volume at `/data`) — **1 service** | **No upstream image and no upstream auth.** The lockfile is the artefact (`--require-hashes`, compiled on linux/amd64; `reme_studio` is unconstrained upstream). Caddy holds a bcrypt hash of `REME_PASSWORD=${{secret(24)}}` (piped on stdin) and is the only public listener, while ReMe keeps its default `127.0.0.1` bind; Caddy answers `/healthz` itself and `flush_interval -1` keeps MCP and SSE streaming. A placeholder `LLM_API_KEY` lets the keyless BM25 half boot (AgentScope builds the client eagerly); embeddings switch on with `EMBEDDING_API_KEY` through a config file, never CLI overrides. Only `daily/` and `digest/` are indexed, asynchronously. A SIGTERM trap gives `exit=0` (was 137) and persists the in-memory index; `ALWAYS` (§5.32) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 

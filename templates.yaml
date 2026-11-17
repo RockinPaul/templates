@@ -90,6 +90,7 @@ templates:
   - name: Multica
     template_repo: RockinPaul/multica_railway_template
     deploy_url: https://railway.com/deploy/multica
+    notes: 'Backend and web pins must agree. Forward-only database migrations and authenticated attachment routes need deployment-specific checks; optional GitHub App setup also needs client ID/secret. See guide §8 for current source notes; no existing-database upgrade was rehearsed in the November update.'
     upstreams:
       - name: backend + web images
         repo: multica-ai/multica
@@ -131,7 +132,7 @@ templates:
   - name: codeg
     template_repo: RockinPaul/codeg_railway_template
     deploy_url: https://railway.com/deploy/codeg
-    notes: Thin pin of the upstream multi-arch image; releases every day or two. See guide §5.20.
+    notes: Thin pin of the upstream multi-arch image; SQLite tables/backfill use upstream migrations. Source review is not an existing-database upgrade rehearsal. See guide §5.20.
     upstreams:
       - name: codeg (published image)
         repo: xintaofei/codeg
@@ -150,7 +151,7 @@ templates:
   - name: Yao Agents
     template_repo: RockinPaul/yao_railway_template
     deploy_url: https://railway.com/deploy/yao-agents
-    notes: Upstream tags 1.0.0-rcN several times a week and publishes multi-arch images; the pin is the image tag = git tag v<version>. Modified Apache-2.0 with commercial clauses. See guide §5.24.
+    notes: Stable releases are available; the multi-arch image tag maps to git tag v<version>. Release candidates remain recognizable for historical pins, but do not supersede a stable pin. Modified Apache-2.0 with commercial clauses. See guide §5.24.
     upstreams:
       - name: yaoapp/yao image
         repo: YaoApp/yao
@@ -173,7 +174,7 @@ templates:
   - name: Mirage Daemon
     template_repo: RockinPaul/mirage_railway_template
     deploy_url: https://railway.com/deploy/mirage-daemon
-    notes: Upstream is 0.0.x "preview", releasing every 2-3 weeks; pin = PyPI version = tag v<version>. See guide §5.23.
+    notes: 'Preview API: mounts use vfs, commands use shell, and HTTP MCP is per workspace. Shared token has no account isolation. Default disk store restores session state, not RAM files; download/load snapshots for those. Pin = PyPI version = tag v<version>. See guide §5.23.'
     upstreams:
       - name: mirage-ai (PyPI)
         repo: strukto-ai/mirage
@@ -186,11 +187,11 @@ templates:
             pattern: '^ARG\s+MIRAGE_VERSION=(?P<version>[\d.]+)'
         relevant_paths:
           - "python/mirage/server/**"
-          - "python/mirage/runtime/js/**"
-          - "python/mirage/workspace/store/**"
+          - "python/mirage/runtime/**"
+          - "python/mirage/workspace/**"
           - "python/pyproject.toml"
-          - "docs/home/auth.mdx"
-          - "docs/home/cli.mdx"
+          - "docs/home/authentication.mdx"
+          - "docs/home/access/**"
           - "docs/typescript/server-and-cli.mdx"
       - name: quickjs-ng (qjs-wasi.wasm release asset)
         repo: quickjs-ng/quickjs
@@ -266,7 +267,7 @@ templates:
   - name: tlbx
     template_repo: RockinPaul/tlbx_railway_template
     deploy_url: https://railway.com/deploy/tlbx
-    notes: Upstream releases several times a day and marks most prerelease; pin a stable tag. See guide §5.19.
+    notes: 'Pin a stable tag and both Linux archive digests. Native AOT bundles mt/mthost/mtagenthost; no separate .NET runtime. Password login through Caddy needs no Local Connect pairing; previews share the main listener. See guide §5.19.'
     upstreams:
       - name: tlbx (release binary)
         repo: tlbx-ai/tlbx
@@ -279,6 +280,11 @@ templates:
         relevant_paths:
           - "src/Ai.Tlbx.MidTerm/Startup/**"
           - "src/Ai.Tlbx.MidTerm/Program.cs"
+          - "src/Ai.Tlbx.MidTerm/Ai.Tlbx.MidTerm.csproj"
+          - "src/Ai.Tlbx.MidTerm/Services/Auth*.cs"
+          - "src/Ai.Tlbx.MidTerm/Settings/**"
+          - "src/Ai.Tlbx.MidTerm/Services/Browser/BrowserPreviewOriginService.cs"
+          - "src/Ai.Tlbx.MidTerm/Services/WebPreview/**"
           - "docs/CommunicationSecurity.md"
           - "install.sh"
       - name: mise
@@ -301,7 +307,7 @@ templates:
   - name: OpenKnowledge
     template_repo: RockinPaul/openknowledge_railway_template
     deploy_url: https://railway.com/deploy/openknowledge
-    notes: Three services behind one Caddy gateway; npm package pinned by version, proxies by image tag. See guide §5.18.
+    notes: Three services behind one Caddy gateway; npm package pinned by version, proxies by image tag. Google is the default browser provider; README documents other providers including GitLab/OIDC. MCP bearer access is separate. See guide §5.18.
     upstreams:
       - name: open-knowledge (npm package, installed at a pinned version)
         repo: inkeep/open-knowledge
@@ -757,7 +763,7 @@ templates:
   - name: ReMe
     template_repo: RockinPaul/reme_railway_template
     deploy_url: https://railway.com/deploy/reme
-    notes: "First template with NO upstream image (ReMe ships only a pip package) and NO upstream authentication - upstream states the service layer has none, CORS allows any origin, jobs may write/move/delete files, and instructs users to place it behind an authenticated reverse proxy rather than exposing it directly. So Caddy holds a generated bcrypt credential as the only public listener while ReMe keeps its default 127.0.0.1 bind and service.host=0.0.0.0 is never set. All 149 resolved packages are hash-pinned in requirements.lock because without an upstream image a rebuild is a fresh resolution; regenerate on linux/amd64. reme-ai declares reme_studio with no version constraint, so the lock is what stops the UI drifting. Apache-2.0. See guide §5.32."
+    notes: "First template with NO upstream image (ReMe ships only a pip package) and NO upstream authentication - upstream states the service layer has none, CORS allows any origin, jobs may write/move/delete files, and instructs users to place it behind an authenticated reverse proxy rather than exposing it directly. So Caddy holds a generated bcrypt credential as the only public listener while ReMe keeps its default 127.0.0.1 bind and service.host=0.0.0.0 is never set. All 142 resolved packages are hash-pinned in requirements.lock because without an upstream image a rebuild is a fresh resolution; regenerate on linux/amd64. reme-ai declares reme_studio with no version constraint, so the lock is what stops the UI drifting. Apache-2.0. See guide §5.32."
     upstreams:
       - name: reme-ai package
         repo: agentscope-ai/ReMe

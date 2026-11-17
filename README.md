@@ -45,4 +45,6 @@ Template repositories built with it:
 
 [`scripts/assess_template_updates.py`](scripts/assess_template_updates.py) runs every Friday via [GitHub Actions](.github/workflows/weekly-template-assessment.yml), reads the upstream version each template repo pins, compares it with the upstream project's releases and default branch, and writes a report to [`reports/`](reports/) (newest: [`reports/latest.md`](reports/latest.md)). The list of templates and the pin locations live in [`templates.yaml`](templates.yaml); scoring rules and local usage are in [`scripts/README.md`](scripts/README.md).
 
+Source maintenance, 2026-11-17: 14 reviewed PRs merged across the linked repositories, including the Mirage and tlbx application upgrades. Current component guidance is in the guide; version pins are read live from the template repos. These source merges do not republish Railway marketplace definitions or establish that an existing deployment has upgraded. Dated assessment reports remain historical snapshots until the next assessment reads the merged sources.
+
 The September 9 additions include component patterns in guide sections 5.11–5.13 and case-file entries in section 8. Section 3.9.1 records the verified CLI/API template-editing workflow; marketplace metadata and defaults are not limited to manual dashboard editing.
