@@ -63,6 +63,7 @@ templates:
   - name: Cognee AI Memory Platform with MCP
     template_repo: RockinPaul/cognee_railway_template
     deploy_url: https://railway.com/deploy/cognee-ai-memory-p-1
+    notes: 'Standard storage is PostgreSQL/pgvector, not Ladybug; API raw files have no volume by default. Upgrade API/MCP together and retain a logical database backup plus raw archive for rollback; old images cannot read the newer Alembic revision. MCP backend credentials do not authenticate its public transport. API-mode string inputs are literal uploads; source-ingestion opt-ins belong on the API and remain unset. See guide §5.5.'
     upstreams:
       - name: cognee API image
         repo: topoteretes/cognee
@@ -246,7 +247,7 @@ templates:
   - name: Orca
     template_repo: RockinPaul/orca_railway_template
     deploy_url: https://railway.com/deploy/orca
-    notes: Upstream releases every day or two; a version bump must move the per-arch .deb digests too. See guide §5.21.
+    notes: 'Reviewed PR https://github.com/RockinPaul/orca_railway_template/pull/1 is UNMERGED pending approved live maintenance; main remains the current assessed pin. The candidate adds direct foreground shutdown and a no-fork kernel profile lock. The old wrapper needs verified graceful preparation and a whole-volume backup before any merge-triggered deployment. Both architecture hashes move together. See guide §5.21; do not treat candidate rehearsal as a live upgrade.'
     upstreams:
       - name: orca-ide (.deb release artifact)
         repo: stablyai/orca
@@ -262,6 +263,11 @@ templates:
           - "docs/site/content/docs/remote-servers.mdx"
           - "docs/site/content/docs/ways-to-run.mdx"
           - "src/cli/runtime/runtime-remote-pairing.ts"
+          - "src/cli/runtime/serve/**"
+          - "src/main/orcad/instance-lock/**"
+          - "src/main/native-chat/agent-session-journal/**"
+          - "src/main/runtime/rpc/server/serve-network-source-policy.ts"
+          - "src/main/runtime/rpc/transports/websocket/source-admission/**"
           - "config/docker/headless-pairing/**"
 
   - name: tlbx
@@ -587,6 +593,7 @@ templates:
   - name: Laminar
     template_repo: RockinPaul/lmnr_railway_template
     deploy_url: https://railway.com/deploy/laminar
+    notes: 'Frontend/app-server move together. Fresh five-service startup, trace ingest/query/search, auth guards and volume replacement were verified; historical-data migration was not. Better Auth accepts NEXTAUTH aliases; FORCE_EMAIL_AUTH requires explicit passwordless-risk opt-in even with an IdP. Agent-table rebuilds and signal-events cleanup need separate review for existing data. See guide §5.15.'
     upstreams:
       - name: frontend + app-server images
         repo: lmnr-ai/lmnr
@@ -601,6 +608,10 @@ templates:
         relevant_paths:
           - "clickhouse-*.xml"
           - "frontend/lib/db/**"
+          - "frontend/lib/auth.ts"
+          - "frontend/lib/auth-local-email.ts"
+          - "frontend/lib/features/features.ts"
+          - "frontend/lib/clickhouse/**"
           - "frontend/drizzle.config.ts"
           - "frontend/next.config.ts"
           - "app-server/src/main.rs"
@@ -804,7 +815,7 @@ templates:
   - name: Marmot
     template_repo: RockinPaul/marmot_railway_template
     deploy_url: https://railway.com/deploy/marmot
-    notes: "Thin wrapper over upstream's own multi-arch image plus su-exec. The entrypoint replaces Marmot's built-in admin:admin against a loopback-only listener before the public port opens, because upstream ships that credential and only tells you to change it after first login — on a public domain that would leave the catalog, the REST API and the MCP endpoint open to whoever tries the obvious pair. Image tags are semver WITHOUT a v prefix; the git tag has one, and upstream also publishes -previewN tags that the tag_pattern deliberately excludes. MARMOT_SERVER_ENCRYPTION_KEY must base64-decode to exactly 32 bytes, which ${{secret(N)}} cannot produce, so the key is derived as base64(sha256(MARMOT_ENCRYPTION_SEED)). Plugins (71 of them in 0.11.0, ~1.5 GB, no way to narrow the list) install from ghcr.io at every startup, so MARMOT_PLUGINS_DIR points at the 5120 MB volume to pay for it once; a bump can outgrow the volume while /readyz stays green, and the entrypoint clears the cache when the marmot version changes. MIT. See guide §5.34."
+    notes: 'Thin upstream image with loopback-only replacement of admin:admin before exposure. Only exact HTTP 401 Invalid credentials skips replacement; transport/status/JSON errors abort. Private files keep bootstrap secrets out of argv and owner-changed passwords survive. MRN upsert/resolve and assets:view/manage roles were tested on a fresh stack; no old-data migration. The 71 cached plugins measured about 1.7 GiB; signed-index security updates remain enabled. Cache is on the 5120 MB volume and refreshed when the Marmot release changes. Stable image tags omit v; git tags include it. Encryption key remains base64(sha256(MARMOT_ENCRYPTION_SEED)). MIT. See guide §5.34.'
     upstreams:
       - name: marmot image
         repo: marmotdata/marmot
@@ -816,6 +827,12 @@ templates:
             pattern: '^ARG\s+MARMOT_VERSION=(?P<version>[\w.-]+)'
         relevant_paths:
           - "Dockerfile"
+          - "pkg/config/**"
+          - "internal/api/v1/users/**"
+          - "internal/api/v1/assets/**"
+          - "internal/api/v1/roles/**"
+          - "internal/plugin/**"
+          - "internal/store/postgres/migrations/**"
           - "web/docs/docs/Deploy"
           - "web/docs/docs/Configure"
           - "web/docs/docs/MCP"

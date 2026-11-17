@@ -4,7 +4,12 @@ How to turn an open-source project into a one-click Railway marketplace template
 
 Related repos and deploy links are indexed in [README.md](README.md). The newer `pipecat-railway-template`, `openpencil-railway-template` and `mise-railway-template` also demonstrate native `.railway/railway.ts` authoring. September 9 updates below distinguish verified CLI/API capabilities from the original dashboard-only workflow.
 
-**Source guidance updated 2026-11-17.** Current component notes and case-file pins reflect the 14 reviewed source merges. Original September/October deployment measurements (sizes, timings and one-click checks) remain historical evidence, not new tests of those pins. Mirage and tlbx have fresh Linux/amd64 container checks described below; no new Railway deployment or marketplace publication was performed.
+**Source guidance updated 2026-11-17.** Current notes include the initial 14 merges plus the merged
+Cognee, Laminar and Marmot upgrades. Orca's reviewed candidate is **unmerged pending approved live
+maintenance**; its main pin remains unchanged. Original dated deployment measurements remain
+historical evidence. The newer Linux/amd64 rehearsals below are local tests, not live Railway
+deployments or marketplace publication. Each dated assessment captures source pins and evidence
+at its generation time; later source changes do not revise those historical verdicts.
 
 ---
 
@@ -338,10 +343,35 @@ plus the stock alias variables (`REDISHOST`, `REDISPORT`, `REDISUSER`, `REDISPAS
 
 ### 5.5 MCP servers (cognee, projectmem, gortex)
 
-- Streamable HTTP at `/mcp`, `/health` open, bearer auth via `Authorization: Bearer <MCP_TOKEN>` with `hmac.compare_digest`; refuse to start without a token when the bind is not localhost.
+- Streamable HTTP commonly uses `/mcp` with an open health path. For a bearer-gated transport,
+  compare tokens in constant time and refuse an empty token on an external bind. Verify the
+  transport checks the caller's token; an outbound backend credential is not that check.
 - The Python `mcp` SDK's DNS-rebinding guard returns **HTTP 421** behind Railway's proxy: `streamable_http_app(transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))` (or the project's env flag, e.g. cognee's `MCP_DISABLE_DNS_REBINDING_PROTECTION=true`).
 - Client setup lines for the README: `claude mcp add --transport http NAME URL --header "Authorization: Bearer TOKEN"`; OpenCode `headers` object.
 - Read-only tool presets for shared deployments (gortex `GORTEX_TOOLS=readonly`).
+
+**Cognee source update, merged 2026-11-17:** API 1.6.8 and MCP `main-5870f15` were rehearsed as
+a pair on the actual Railway `postgres-ssl:18` source image (current PostgreSQL 18.6/pgvector 0.8.7),
+with a supporting PG17 matrix. The standard relational/graph/vector providers are Postgres/pgvector;
+the flagged Ladybug format conversion does not apply. A populated old stack wrote a baseline before
+upgrade; exact users/datasets/documents/graph/vector/provenance snapshots, new writes/searches and
+replacement passed. Application connections negotiated TLS 1.3 without SSL-mode overrides;
+this does not prove CA/hostname verification or mandatory encryption. Model/3072-dimensional
+embedding responses came from a local stub, not a paid provider.
+
+No API volume means raw files disappear on replacement while Postgres content remains searchable.
+Retain a logical database backup, raw-file archive and original image pair. Image-only downgrade
+failed on Alembic revision `e3f1a9c5b7d2`; logical restore plus raw files and old images recovered
+the baseline and accepted new writes. The provenance arrays/six GIN indexes already existed in
+1.6.6: this was preservation/idempotence, not a newly introduced graph-format conversion.
+
+Cognee's default public MCP transport is unauthenticated. Backend auth plus `COGNEE_API_KEY`
+still lets anonymous MCP callers use that credential; keep MCP private or use an authenticated
+gateway. `COGNEE_API_AUTH_SCHEME=x-api-key` avoids the entrypoint's `API_TOKEN` argv path.
+In API mode, `remember(data=URL_OR_DSN)` uploads literal text, so never include a credential-bearing
+DSN. Explicit API `raw_data` source ingestion needs the API's `ALLOW_HTTP_REQUESTS` or
+`ALLOW_DATABASE_INGESTION` opt-in; leave both unset unless deliberate. Explicit true still refused
+private HTTP targets and Cognee's own database, while controlled local positive fixtures passed.
 
 ### 5.6 Privilege drop when the image runs as root only for the volume
 
@@ -514,6 +544,22 @@ Verify through the product's own API and assert on bodies, not status codes: Her
 app-server, ClickHouse, Quickwit, PostgreSQL) with **two required composer fields** and everything
 else wired. The interesting parts:
 
+**Source update, merged 2026-11-17:** frontend and app-server now use v0.3.4 together. Fresh
+five-service Linux/amd64 tests covered deliberate local-email opt-in, authenticated workspace/project/
+API-key creation, OTLP ingest, trace query and Quickwit search, then replacement on the same volumes.
+User/project/trace identities, session/key validity and migration counts persisted (129 PostgreSQL,
+83 ClickHouse). No real OAuth/browser, optional CLI authentication, paid model or live Railway test
+is claimed; no existing-data migration was rehearsed because this template has no active deployment.
+
+Better Auth accepts the existing `NEXTAUTH_URL`/`NEXTAUTH_SECRET` aliases. `FORCE_EMAIL_AUTH=true`
+can enable passwordless email even with an IdP, so the merged wrapper requires explicit
+`ALLOW_PASSWORDLESS_SIGNIN=true` for that risk; five durable guard cases pass. The telemetry switch
+is `LAMINAR_TELEMETRY_DISABLED`. Configure frontend public/internal origins for optional CLI auth
+rather than relying on its hosted-service fallback. Agent-versioning table rebuilds and the
+signal-events ReplacingMergeTree/backfill did not block fresh setup; the copied legacy table was
+empty and its manual cleanup is not a fresh-install prerequisite. Historical measurements below
+were not relabeled as a rehearsal on existing data.
+
 - **Find the project's own "lite" switch before adding services.** `ENVIRONMENT=LITE` turns
   RabbitMQ, Redis and Quickwit from dependencies into no-ops, each gated purely on its URL
   variable being present: the API server falls back to an in-memory cache and in-process span
@@ -532,7 +578,7 @@ else wired. The interesting parts:
   time, overriding the image's `ENV`. `export HOSTNAME=::` has to happen inside the entrypoint.
 - **Check how the project authenticates when nothing is configured.** Laminar's self-hosted
   sign-in accepts **any email address with no password** when no identity provider is set, which
-  on a public URL is an open door. Configuring GitHub OAuth unmounts that plugin automatically, so
+  on a public URL is an open door. Without the force-email override, configuring an IdP disables it, so
   the template makes the two GitHub values required and the entrypoint refuses to boot without
   them unless an explicit `ALLOW_PASSWORDLESS_SIGNIN=true` opts in. Deploy order for the operator
   is documented, because the OAuth callback needs a domain that does not exist until after the
@@ -870,6 +916,36 @@ database before upgrading an actual deployment; a source/registry check does not
 ---
 
 ### 5.21 A desktop application run headless, and a volume that mounted but went unused (Orca)
+
+**Reviewed PR pending maintenance — not a merged upgrade.**
+[PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1), reviewed head
+`3b70df60b51ad3d15bec81e4fd03c43848f30e66`, targets 1.4.261; main still pins 1.4.245.
+Main triggers a live deployment, so do not merge before explicit rollout approval and old-wrapper
+preparation. Read-only deployment evidence confirms the old source commit `49bb63c…`, `ON_FAILURE`
+with 10 retries, one replica and `/` healthcheck (300 s). Check the effective control plane again at
+rollout time; do not assume a restart policy from a file.
+
+The candidate runs foreground plain-Node `orcad` without `xvfb-run` between Tini and the CLI.
+Normal stop exited 0 and released the upstream lock; a no-fork kernel profile lock refused a second
+updated container across PID namespaces (exit 75). No foreign-lock deletion or persisted machine-id
+workaround is added. This does not retrofit shutdown of the old running wrapper: verify its recorded
+machine identity, boot ID, PID command and start ticks, obtain clean exit/lock release, and validate
+the whole-volume backup plus original image **before** any merge-triggered deployment. `ON_FAILURE`
+clean-exit maintenance and a separate explicit `ALWAYS` hold were rehearsed locally; live maintenance
+is not authorized or performed. The [candidate runbook](https://github.com/RockinPaul/orca_railway_template/blob/update/2026-11-17/README.md#first-upgrade-from-the-old-wrapper)
+is the concrete preparation/rollback reference while the PR remains open.
+
+The local Linux/amd64 matrix used exact old persistence APIs for synthetic 100-turn/300-item,
+empty and queued-only fixtures; real old/new packages performed import and paginated paired reads.
+The old pairing, first/final content, queued draft and file/settings state survived. After an old-layer
+turn 101 write, re-upgrade kept the original 300 items and a separate 303-item continued history;
+queue-reopen tombstones also produced a recovered queue variant. Normalized seven record IDs/names
+and four source receipts stayed stable on repeat start. Untouched whole-volume backup restore with the
+original image recovered the old state. No paid agent, browser/provider re-authentication or live
+rollout is claimed. Both target package hashes were verified; runtime tests were amd64.
+
+The original wrapper observations below are historical/current-main context, not a claim that the
+reviewed candidate is deployed or still needs its old virtual-display wrapper.
 
 Orca is an Electron agent development environment. Upstream ships desktop packages and a documented
 `orca serve` mode, no server image, and scopes Remote Orca Servers to a private network. The
@@ -2086,18 +2162,30 @@ provisioned normally.
 [Marmot](https://github.com/marmotdata/marmot) (MIT) is a data catalog: it indexes the tables, topics,
 queues and APIs you already run and makes them searchable by a team in a web UI and by agents over
 MCP. Upstream publishes multi-arch images of a static Go binary with the frontend embedded, running
-as a non-root user on Alpine, so the template is a thin `FROM ghcr.io/marmotdata/marmot:0.11.0` plus
-`su-exec` — BusyBox's `setpriv` is a capabilities-only stub with no `--reuid`, so the usual Alpine
+as a non-root user on Alpine, so the template is a thin `FROM ghcr.io/marmotdata/marmot:0.13.0` plus
+`su-exec`, curl and jq. BusyBox's `setpriv` is a capabilities-only stub with no `--reuid`, so the usual Alpine
 tool for dropping privileges has to be installed.
+
+**Source update, merged 2026-11-17:** a fresh Linux/amd64/Postgres stack passed MRN upsert,
+identity/resolve/search, restricted `assets:view` reads and `assets:manage` write refusals, then
+replacement retaining catalog identity, an owner-changed password and all 71 cached plugin files.
+The cache measured 1,765,128 KiB (about 1.7 GiB), below 5 GiB. Signed-index checks and automatic
+security updates stay enabled, so plugin versions may change between Marmot image releases.
+Query permissions replace `assets:preview`; review custom roles/API clients. No historical-data
+migration, external connector, browser/SSO or live Railway test is claimed for 0.13.0. Dated 0.10/0.11
+measurements below remain historical evidence.
 
 **The reason the template exists.** Marmot's built-in account is `admin:admin`, and upstream's Docker
 guide simply tells you to change it after first login. On a public Railway domain the gap between
 "deployed" and "got around to it" is a catalog, a REST API *and* an MCP endpoint standing open to
 whoever tries the obvious pair. Same answer as §5.29: the entrypoint starts Marmot bound to
-`127.0.0.1:18080`, signs in with the default credential, PATCHes the password to
+`127.0.0.1:18080`, signs in with the default credential, POSTs the password replacement to
 `MARMOT_ADMIN_PASSWORD`, waits for that listener to actually disappear, and only then execs the
-public one. Idempotent — on later boots the default login fails, the step is skipped, and a password
-a human rotated from the UI is left alone — and fail-closed, refusing to start on an empty or
+public one. Only HTTP 401 with parsed `error: "Invalid credentials"` permits the later-boot skip;
+transport failures, unexpected status/body and invalid success tokens abort before exposure.
+Bootstrap secrets use private files rather than argv. A human-rotated password is left alone.
+The bootstrap regression covers success, persisted password and eight ambiguous failures. The
+entrypoint also refuses to start on an empty or
 under-12-character password. The `su-exec` call is backgrounded directly rather than through a shell
 function, because a function call runs in a subshell and `$!` would then be the subshell's pid,
 leaving the bootstrap server alive holding database connections.
@@ -2402,7 +2490,7 @@ not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
 
 | Template | Code | Services | Key decisions and lessons |
 |---|---|---|---|
-| Cognee AI Memory Platform with MCP | `cognee-ai-memory-p-1` | cognee-api (`cognee/cognee:1.6.6`), cognee-mcp (`main-df2b4fa`, the 1.6.6 release commit, http `/mcp`), Postgres | MCP 421 fixed with the DNS-rebinding flag; `EMBEDDING_API_KEY=${{LLM_API_KEY}}`; personal instance later switched to cheaper OpenRouter models; the old README code `SKKN1Y` was dead; 1.6.4 no longer signs tokens with the public `super_secret`, so a deployment with auth on needs `FASTAPI_USERS_JWT_SECRET` or every restart invalidates tokens |
+| Cognee AI Memory Platform with MCP | `cognee-ai-memory-p-1` | cognee-api (`cognee/cognee:1.6.8`), cognee-mcp (`main-5870f15`, a tested compatible build from a different source commit, http `/mcp`), Postgres | MCP 421 fixed with the DNS-rebinding flag; `EMBEDDING_API_KEY=${{LLM_API_KEY}}`; personal instance later switched to cheaper OpenRouter models; the old README code `SKKN1Y` was dead; 1.6.4 no longer signs tokens with the public `super_secret`, so a deployment with auth on needs `FASTAPI_USERS_JWT_SECRET` or every restart invalidates tokens; **MCP transport remains unauthenticated even with a backend key**; standard PG18/pgvector upgrade/replacement and logical rollback were rehearsed, raw files still need their own archive (§5.5) |
 | Multica | `multica` | frontend (Next.js), backend (Go, `/readyz`, uploads volume), pgvector | Turned a stale fork into a thin wrapper over `ghcr.io/multica-ai/*` (v0.4.41, now v0.10.0 with `DO_NOT_TRACK=true` baked in because v0.4.44's deployment telemetry ignores `ANALYTICS_DISABLED`); `RESEND_API_KEY=" "` default broke login (500) — blank optional defaults; realtime works through the frontend proxy despite upstream docs; rollback logs schema errors; v0.6.3 closes a removed member's realtime socket (on v0.6.2 it kept receiving the workspace's events, reproduced) |
 | projectmem | `projectmem` | projectmem (Python, volume `/data`) | No upstream image: `pip install projectmem==0.3.4 mcp==2.2.0`; stdio-only tool wrapped in a Starlette Streamable-HTTP app with bearer auth; entrypoint registers projects idempotently; `serviceConnect` instead of `railway add -r` |
 | gortex | `gortex` | gortex (Go binary v0.64.11, cosign-verified checksums, XDG dirs on `/data`), web (Next.js behind Caddy basic auth) | Default repo = gortex's own; `GORTEX_TOOLS=readonly`; socket/pid in `/tmp`; Caddy injects the daemon token so the browser never sees it; from v0.64.8 the daemon 403s any browser `Origin`, so Caddy refuses cross-site `/v1` requests itself and strips `Origin` from same-origin ones; `/healthz` proxied to Node; repo connection lag |
@@ -2412,7 +2500,7 @@ not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
 | Notesnook | `notesnook-sync-server` | mongo (7.0.12, single-node RS), minio (Silo + mc since 2026-11, MinIO's images having left Docker Hub), identity/notesnook-sync/sse (v1.0-beta.46)/monograph (streetwriters images) — 6 services, each built from its own `rootDirectory` | Every app on Railway's `PORT` 8080 (image `PORT` env is overridden); single-node Mongo advertises `localhost` + clients `directConnection=true` (else ReplicaSetGhost); thin wrappers bake the fixed constants so the composer is two optional fields; all wiring by references, shared secret + MinIO creds via `${{secret()}}`/service refs; presigned attachments against the public MinIO domain, data in `/data/s3`; verified with the real signup/token/attachment path |
 | Pipecat | `pipecat` | one Python 3.12.14 / Pipecat 1.8.1 service: session API, bot processes and bundled browser client; external Daily WebRTC; no database or volume | Password-protected, one active session/worker/replica; OpenAI/Gemini/Grok native voice, OpenRouter/Ollama STT–LLM–TTS; conditional key validation before paid room creation; short-lived room tokens and cleanup; Ollama endpoint is not bundled inference; readiness and mocked adapters are not live-provider proof (§5.11) |
 | OpenPencil | `openpencil` | public Caddy gateway, private digest-pinned v0.8.4 prerelease Rust web host, 1024 MB volume at `/data` | `admin` + generated password; one shared `/data/workspace.op`; File → Save persists, Save As exports, no autosave; exact origins and private control endpoints; browser-local AI keys, shared server credential snapshots disabled; 80 tests and real save/redeploy checks, no live AI-provider validation (§5.12) |
-| Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.3.2`, frontend healthcheck timeout 900 s), clickhouse-server 26.5, quickwit v0.9.1, postgres 16 — 5 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` cut seven services to four; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint refuses to boot without it; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok` (§5.15) |
+| Laminar | `laminar` | frontend + app-server (`ghcr.io/lmnr-ai/*:v0.3.4`, frontend healthcheck timeout 900 s), clickhouse-server 26.5, quickwit v0.9.1, postgres 16 — 5 services, each from its own `rootDirectory` | **Two required fields, both GitHub OAuth.** `ENVIRONMENT=LITE` drops broker/cache dependencies while Quickwit remains for search; the Rust app-server binds IPv4 only so the wrapper bridges it onto the IPv6 private network with `socat`; Next.js needed `HOSTNAME=::` exported in the entrypoint because Railway injects that variable at run time; the self-hosted login accepts any email with no password until OAuth is set, so the entrypoint requires an IdP unless passwordless risk is explicitly accepted; forced email with an IdP is guarded too; `healthcheckPath` rejected `/sign-in` and `/robots.txt` and the root 307s, leaving `/api/auth/ok`; fresh local-email/OTLP/query/search and full replacement passed; no old-data or real OAuth/browser rehearsal (§5.15) |
 | HertzBeat | `apache-hertzbeat` | hertzbeat (`apache/hertzbeat:1.9.0`, Hibernate PostgreSQL dialect set by env), postgres 15, victoria-metrics — 3 services, each from its own `rootDirectory` | **Zero composer fields; `deploy -t` never prompted.** Environment-only overrides moved it off embedded H2 + DuckDB onto Postgres + VictoriaMetrics, with defaults read from the pinned image because the repo compose is EclipseLink-mismatched and pins an unpublished tag; Flyway's `{vendor}` resolved itself; `/actuator/health` was 401 until the entrypoint opened it in `sureness.yml`; the same entrypoint rewrites the file-based `admin` credential from `${{secret(24)}}`; bad logins return HTTP 200 with an error body; monitor params use `paramValue` (§5.14) |
 | Fabric | `fabric` | one Go service built from pinned upstream source (no upstream image), volume at `/home/appuser/.config/fabric` | **Built from source without forking.** A 190 MB fork pinned 27 releases behind became a 228 KB repo whose Dockerfile clones a pinned tag, asserts that tag's commit so a moved tag fails the build, and applies a patch that began at 84 lines (`/health` plus its auth exemption, `text/readystream` → `text/event-stream`, CORS off hardcoded `localhost:5173`) and is now only `/health` — at v1.4.518 upstream took the other two, its CORS (`FABRIC_CORS_ORIGINS`) answers preflight before the key check where the old hunk 401'd it, and the key moved from `--api-key` to the environment; the bump to v1.4.478 brought two upstream security fixes and forced Go 1.26; Fabric reads providers from `~/.config/fabric/.env` not the process env, so keys land in plaintext on the volume; `railway.json` supplies the healthcheck the reference project lacked, and that reference project later vanished (§5.16) |
 | Persistent mise Workspace | `persistent-mise-workspace` | one private Debian 13 Linux/amd64 SSH workspace with mise 2026.11.9, Node 24.21.0, Python 3.13.15, uv 0.12.11 and Tini; `/root` volume 5000 MB | No public listener or app keys; offline first-boot seed at identical install prefix; preserve owner files/tools and never run volume content at boot; CI trust guard; native IaC variable preservation; 2 vCPU/2 GiB, sleep off, daily backups verified in fresh copy; 27 tests plus real redeploy and deleted-runtime backup recovery (§5.13) |
@@ -2420,7 +2508,7 @@ not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
 | OpenKnowledge | `openknowledge` | ok (`@inkeep/open-knowledge@0.89.7` on `node:24-slim`, editor + `/mcp`, git repo on a 1 GB `/data` volume), oauth2-proxy v7.15.6 and caddy 2.11.9 — 3 services, each from its own `rootDirectory`, **only caddy public** | **Three required fields for browser OAuth; Google by default, other providers documented.** The server has no login of its own, so Caddy fronts everything and splits by path: `/mcp*` on a bearer token straight to the app, the rest through oauth2-proxy to Google — two paths because agents cannot do an interactive login and browsers cannot attach a bearer to the `/collab` WebSocket; oauth2-proxy's default `[::]:4180` made Railway start and stop the container with no error until every service was moved to `:8080`; `OK_EXTERNAL_URL` doubles as a Host allowlist so the app 403s any direct probe and must be reached over `railway ssh`; the cookie secret needs `${{secret(32, "abcdef0123456789")}}` because oauth2-proxy validates byte length; `git` is a hard boot requirement and `ok init` must be fed `< /dev/null`; MCP over streamable HTTP is session-based, so a probe that skips the `Mcp-Session-Id` handshake reports zero tools (§5.18) |
 | tlbx | `tlbx` | tlbx (`mt` release binary v11.1.8 (.NET 11 Native AOT) + mise v2026.11.9 on `node:22-bookworm-slim`, shells and coding agents, 5 GB `/data` volume) and caddy 2.11.9 — 2 services, each from its own `rootDirectory`, **only caddy public** | **Zero composer fields.** The app serves HTTPS only and has no HTTP mode, so Caddy fronts it over TLS with verification skipped and answers the health probe itself; the app service gets no healthcheck at all. Its same-origin check compares the browser `Origin` to `request.Host` on scheme, host and port, and Caddy's TLS transport rewrites `Host`, so every WebSocket 403'd while the page loaded — fixed with `header_up Host {http.request.hostport}`. `HOME`, the npm prefix and mise's data live on the volume so installs survive redeploys; `${{secret(48)}}` generates the password. Sessions end on redeploy and there is no Docker. App previews now use the main origin; password login through Caddy needs no Local Connect pairing (§5.19) |
 | codeg | `codeg` | codeg (`xintaofei/codeg:0.45.0`, Rust server + Next.js UI, SQLite on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields.** Upstream publishes multi-arch images, so the template is a thin `FROM` pin; the app speaks plain HTTP on a configurable port, so Railway's edge reaches it directly. `CODEG_TOKEN=${{secret(32, hex)}}`; with no token the app generates and logs one rather than serving open. `VOLUME` inherited from the base image built fine, and the app writes its database straight into a root-owned mount root beside `lost+found` with no entrypoint. Health is `/` (200 unauthenticated) — every unknown `/api/*` path answers a misleading `501`, and `/api/health` is POST-only. Agent CLIs and in-place updates do not survive a redeploy; both stated in the listing (§5.20) |
-| Orca | `orca` | orca (`orca-ide` 1.4.245 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
+| Orca | `orca` | orca (`orca-ide` 1.4.245 `.deb` on `debian:13-slim`, an Electron agent IDE run headless, home on a 5 GB `/data` volume) — **1 service, no gateway** | **Reviewed [PR #1](https://github.com/RockinPaul/orca_railway_template/pull/1) pending approved maintenance; main stays 1.4.245.** The candidate uses direct orcad shutdown and a kernel profile lock; its migration/runbook evidence is in §5.21. Original-wrapper context: **zero composer fields and no password**: Orca mints a pairing identity on first boot and logs the pairing URL. Four things are needed to run Electron headless here — xvfb, `xauth` (a *recommends* that `--no-install-recommends` drops), the undeclared `libasound2`, and `ELECTRON_DISABLE_SANDBOX=1` with a non-root user, because Railway's seccomp denies `CLONE_NEWUSER`. `gosu` reset `HOME` from `/etc/passwd`, so the volume mounted but went unused and every redeploy rotated the pairing identity; fixed with `useradd -d /data/home -M`. The advertised address must be `wss://$RAILWAY_PUBLIC_DOMAIN`, with no port. Upstream scopes the feature to private networks and marks it beta — stated in the listing (§5.21) |
 | DSH + LongMemory | `dsh-longmemory` | dsh (`@deepseek-ai/dsh` 0.1.7-rc.2 on `node:22`, Caddy 2.11.9 binary in the same container, mise v2026.11.9, 5 GB `/data`) and longmemory (built from the §5.17 template repo, 1 GB `/data`) — 2 services, **only dsh public** | **Zero required fields**; `DEEPSEEK_API_KEY` optional because the UI takes it. The app binds loopback only and refuses 0.0.0.0, so Caddy runs beside it; its `/api` fence needs `Host` passed through and the public domain registered with `--trusted-host`, else every WebSocket is 403. The generated `DSH_GATE_PASSWORD` protects the public gateway; token redemption stays internal, inside the same guarded Caddy `route`. LongMemory joins as a streamable-http MCP row applied by `--patch`, with the reconnect budget raised because the default gives up before a sibling's source build finishes. Three older marketplace templates for the same app pin a pre-auth rc and two use the full trademark in their names (§5.22) |
 | Mirage Daemon | `mirage-daemon` | mirage (`mirage-ai` 0.0.8 on `python:3.12-slim` with storage/data backends + Monty + quickjs-ng 0.18.0 wasm, socat dual-stack relay, `/data` volume) — **1 service** | **Zero required fields**; `MIRAGE_AUTH_TOKEN=${{secret(48)}}`, entrypoint refuses empty/short tokens. Railway's health probe sends `Host: healthcheck.railway.app` and the daemon fences Host before auth → first deploy failed until it was trusted; uvicorn is single-family under asyncio so socat fronts a loopback bind; the daemon SIGTERMs itself 30 s after its last workspace (0 = now) so the grace is ten years plus restart `ALWAYS`; live registry starts empty after restart; recreate restores sessions but not RAM files, which need snapshot download/load; HTTP MCP uses the same bearer; script runtimes need `mode: exec` and JS needs the pinned `qjs-wasi.wasm` (§5.23) |
 | Yao Agents | `yao-agents` | yao (`yaoapp/yao:1.0.0` upstream multi-arch image + su-exec/socat/tini, app + SQLite in `/data/yao` on a 5 GB volume) — **1 service** | **Zero required fields**; `YAO_ROOT_PASSWORD=${{secret(24)}}`. The bundled app creates root with a hard-coded `Yao123++`, so the entrypoint runs `yao init`, re-hashes root from the secret via `models.__yao.user.UpdateWhere` on every boot, and refuses to start without one (proven at the bcrypt layer; the login itself is captcha-gated). The app's `.env` is loaded with `godotenv.Overload` and beats Railway variables, so production/loopback/port are written into it; `YAO_HOST=::` crashes with `Host not found` so socat fronts the IPv4 engine; app in a subdirectory because `yao init` refuses the `lost+found` mount root. Modified Apache-2.0 with a 50-employee/USD 1M commercial clause, stated verbatim (§5.24) |
@@ -2432,6 +2520,8 @@ not rehearsed with an existing database. `DO_NOT_TRACK=true` remains baked in.
 | Trivy Server | `trivy-server` | trivy (`ghcr.io/aquasecurity/trivy:0.76.2` upstream multi-arch image used as-is, 179 MB, 1.3 GB vulnerability DB on a 5 GB volume at `/data`) — **1 service** | `TRIVY_TOKEN=${{secret(32)}}` plus a prefilled `PORT=8080`. **No browser surface at all** — `GET /` is a bare 404; the listing leads with the client command and points at `/version`. The token is mandatory because upstream's optional token is paired with a loopback default bind and their guidance for an exposed server is to set one; an empty token disables auth entirely (`token != "" && token != header`), and an open server lets a stranger write and delete shared cache entries other clients' scans depend on. Every setting arrives as a `TRIVY_*` env var so the token never enters `ps`. DB downloads **before** the listener opens (8 s cold, 3 s warm, 600 s timeout); exclusive cache lock so **single replica only**; `ALWAYS` because SIGTERM exits 0 (§5.30) |
 | QwenPaw | `qwenpaw-1` | qwenpaw (`agentscope/qwenpaw:v2.3.0` upstream multi-arch image, 2.84 GB, plus a thin wrapper; working, secret and backup dirs on a 5 GB volume at `/data`) — **1 service** | `QWENPAW_AUTH_PASSWORD=${{secret(24)}}`; the entrypoint refuses to boot unless `QWENPAW_AUTH_ENABLED=true` with a 12+ character password, including an explicit `false`. **No socat**: QwenPaw skips auth for loopback peers, so an in-container relay made `/api/skills` 200 instead of 401; upstream's `--host 0.0.0.0` is right because Railway's public edge reaches the container over IPv4 (a `::` patch got 502 on every path). Auto-registration is write-once, so editing the password variable rotates nothing (stated in the listing). Persona language defaults to `zh` and is fixed at first init, so the wrapper seeds `config.json` before running init itself. llama.cpp's `GLIBC_2.38` failure was arm64-only; on amd64 it loads. Healthcheck `/api/auth/status`; `ALWAYS` because SIGTERM exits 0. Published as `qwenpaw-1` because a stale `qwenpaw` (v1.1.0, no auth) existed (§5.31) |
 | ReMe | `reme` | reme (`reme-ai[core]==0.4.2.2` on `python:3.12-slim` from a hash-pinned `requirements.lock`, Caddy 2.11.9 in the same container, Markdown workspace on a 5 GB volume at `/data`) — **1 service** | **No upstream image and no upstream auth.** The lockfile is the artefact (`--require-hashes`, compiled on linux/amd64; `reme_studio` is unconstrained upstream). Caddy holds a bcrypt hash of `REME_PASSWORD=${{secret(24)}}` (piped on stdin) and is the only public listener, while ReMe keeps its default `127.0.0.1` bind; Caddy answers `/healthz` itself and `flush_interval -1` keeps MCP and SSE streaming. A placeholder `LLM_API_KEY` lets the keyless BM25 half boot (AgentScope builds the client eagerly); embeddings switch on with `EMBEDDING_API_KEY` through a config file, never CLI overrides. Only `daily/` and `digest/` are indexed, asynchronously. A SIGTERM trap gives `exit=0` (was 137) and persists the in-memory index; `ALWAYS` (§5.32) |
+
+| Marmot | `marmot` | `ghcr.io/marmotdata/marmot:0.13.0`, Postgres catalog and 5120 MB plugin-cache volume | Loopback-only default-admin replacement, exact wrong-credential skip and fail-closed transport/HTTP/JSON handling; private bootstrap files; MRN upsert/resolve and assets:view/manage guards verified on a fresh stack. Replacement retained catalog identity, owner-changed password and 71 cached files (about 1.7 GiB); signed security updates remain enabled. No old-data, connector or real SSO/browser rehearsal (§5.34) |
 
 Reference-project and template ids live in the per-template memory notes (`railway-<name>-template-ids`) and in each repo's docs.
 
