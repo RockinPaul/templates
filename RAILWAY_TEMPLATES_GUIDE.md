@@ -271,6 +271,7 @@ Per template: a memory note with ids (project, environment, services, volumes, t
 - **Config-as-code (`railway.json` / `railway.toml`) is deprecated and already off for new services.** Railway's docs: "New services cannot opt into Config as Code"; legacy services keep reading the file until the **2026-12-01** hard cutoff, and how a service is classed is undocumented. Measured 2026-09-23: OpenKnowledge's reference services (created 2026-09-14) still applied the file — the deployment's `meta.propertyFileMapping` listed `build.watchPatterns`, `meta.serviceManifest` took the values, and docs-only pushes came back `SKIPPED` — while Octop's (created 2026-09-15) parsed it and ignored it. Every one-click copy is a new service, so a setting that lives only in the file is already missing for deployers.
 - **The template definition carries `deploy.*` (`healthcheckPath`, `healthcheckTimeout`, `restartPolicyType`, `restartPolicyMaxRetries`, `startCommand`) and never `build.*`** — no builder, Dockerfile path or watch patterns. Put deploy settings on the service instance before generation, or add them with a change set afterwards, and read them back. `.railway/railway.ts` is applied only by the CLI (`railway config plan` / `apply`); deploys never read it, so it is no substitute for templates.
 - Audit 2026-09-23 of all 32 published templates (definition vs `railway.json`, read from each service's `rootDirectory`): 13 have no file, 14 carry everything the file sets, and the only file-only setting that mattered was Marmot's 900 s `healthcheckTimeout` (§5.34). LongMemory's 120 s timeouts and the OpenKnowledge/tlbx watch patterns were file-only but harmless: deployers receive update notifications rather than automatic redeploys, so watch patterns only ever affected the reference projects.
+- Audit 2026-11-18 of the 13 surviving reference projects (service instance vs `railway.json`): every instance already carried the file's healthcheck, restart policy and watch patterns except HolyClaude's (file `/` 600 s, instance null), fixed with `serviceInstanceUpdate`. The cutoff therefore changes nothing for the reference projects. `railway.json` is removed from each template repo in that repo's next real commit (LongMemory first, `e2a56a9`), not in a sweep, because every push sends deployers an update notification. A deployment built without the file reads `meta.propertyFileMapping: {}`.
 - The published **code** is the name slug. Finalize the name before publishing through a change set or the dashboard. An abandoned unpublished template can retain a random code (`mVtlXT-…`, `tS2HIy`, `shcTAS`); verify the final deploy URL instead of reusing its draft code.
 - `railway deploy -t <code>` uses the template's defaults; missing defaults → interactive prompts → failure without a TTY.
 - Marketplace description ≤ 75 characters. `--image` is a URL. The overview readme has an expected structure (§6).
@@ -694,14 +695,15 @@ Re-cut as a thin repo it is 228 KB and ten files — `Dockerfile`, `entrypoint.s
   through. Consequence worth documenting for deployers: provider keys then sit in plain text on the
   volume. Rewrite the file by grep-filter-and-append rather than `sed -i`, or a key containing a
   slash or backslash corrupts it.
-- **Put deploy settings in `railway.json` at the repo root.** The reference project's service had
-  `healthcheckPath` null while the published template carried `/health`; regenerating from that
-  project would have silently dropped the healthcheck. A committed `railway.json` survives
-  regeneration and keeps the two in step.
+- **Put deploy settings on the reference service instance, not only in the template.** The
+  reference project's service had `healthcheckPath` null while the published template carried
+  `/health`; regenerating from that project would have silently dropped the healthcheck.
+  (Originally fixed with a committed `railway.json`; config-as-code stops on 2026-12-01, so the
+  service instance is now the only place that survives regeneration.)
 - **A reference project can disappear from under you.** Fabric's (`12b93c4f`) was gone when needed
   for a regeneration — not deleted by this session. Nothing warns you; the template keeps working
   because it is an independent object, but you cannot regenerate it. Treat the reference project as
-  reproducible infrastructure, and keep enough in the repo (`railway.json`, documented variables) to
+  reproducible infrastructure, and keep enough in the repo (documented variables and deploy settings) to
   rebuild it.
 - Archive the history before re-cutting: `git bundle create ~/fabric_fork_archive.bundle --all`
   (148 MB, verified complete) restores the old fork with `git fetch <bundle> main` and a force-push.
